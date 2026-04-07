@@ -36,5 +36,9 @@ export function collectLayoutTopics(config: AppConfig | null): LayoutTopicItem[]
     });
   });
 
+  // 🌟 Ensure /tf and /tf_static are always subscribed if they exist in topics
+  if (!topicMap.has('/tf')) topicMap.set('/tf', { name: '/tf', type: 'tf' });
+  if (!topicMap.has('/tf_static')) topicMap.set('/tf_static', { name: '/tf_static', type: 'tf_static' });
+
   return Array.from(topicMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

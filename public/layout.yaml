@@ -8,7 +8,7 @@ visualize:
     topic: "/cloud_registered"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: true
-    last_time: 5
+    last_time: 2
     color_field: "intensity"
     color_scheme: "turbo"
     
@@ -57,5 +57,5 @@ chart:
 tf: 
   fixed_frame: "map"
   hidden_frame:
-    - "livox_frame_192_168_1_196" 
+    - "livox_frame_192_168_1_198" 
     - "livox_frame_192_168_1_187"
