@@ -192,10 +192,14 @@ export function useFoxglove(url: string) {
       if (!messageBufferRef.current[topicName]) {
         messageBufferRef.current[topicName] = [];
       }
+      // 针对大数据结构，限制历史消息数量来释放内存
+      const isLargeData = topic.schemaName === 'sensor_msgs/msg/PointCloud2' || topic.schemaName === 'sensor_msgs/msg/Image';
+      const MAX_LENGTH = isLargeData ? 2 : 50; 
+      
       const buffer = messageBufferRef.current[topicName];
       buffer.push(newMessage);
-      // 保持历史限制
-      while (buffer.length > 200) {
+      // 保持历史限制，防止内存泄漏和 OOM
+      while (buffer.length > MAX_LENGTH) {
         buffer.shift();
       }
 
@@ -229,8 +233,6 @@ export function useFoxglove(url: string) {
 
       const subId = client.subscribe(topic.id);
       console.log(`正在订阅话题: ${topicName} (ChannelID: ${topic.id}, SubID: ${subId})`);
-
-      // Map SDK subscription id to topic name for message routing
       subscriptionsRef.current.set(subId, topicName);
       topicToSubscriptionRef.current.set(topicName, subId);
     }
