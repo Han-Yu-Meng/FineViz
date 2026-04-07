@@ -4,10 +4,9 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Map as MapIcon, Activity, ListTree, LineChart, Info } from 'lucide-react';
 import { useConfig } from './hooks/useConfig';
 import { useFoxglove } from './hooks/useFoxglove';
-import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { DeckGLView } from './components/DeckGLView';
 import { collectLayoutTopics } from './lib/layoutTopics';
@@ -19,6 +18,7 @@ export default function App() {
   const layoutTopicNames = useMemo(() => layoutTopics.map((t) => t.name), [layoutTopics]);
   const [topicVisibility, setTopicVisibility] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [mobileTab, setMobileTab] = useState<string>('map');
 
   useEffect(() => {
     setTopicVisibility((prev) => {
@@ -54,10 +54,10 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 text-slate-900 overflow-hidden">
-      <TopBar config={config} connected={connected} />
+    <div className="flex flex-col h-[100dvh] bg-slate-50 text-slate-900 overflow-hidden">
       <div className="flex flex-1 overflow-hidden relative">
-        <div className={`h-full shrink-0 transition-[width] duration-300 ease-in-out z-20 ${
+        {/* DESKTOP SIDEBAR */}
+        <div className={`hidden md:block h-full shrink-0 transition-[width] duration-300 ease-in-out z-20 ${
           isSidebarOpen ? 'w-80' : 'w-0'
         }`}>
           {/* Prevent inner content from shrinking and causing layout issues during animation */}
@@ -76,10 +76,26 @@ export default function App() {
           </div>
         </div>
 
-        {/* Floating toggle button */}
+        {/* MOBILE SIDEBAR CONTENT (Hidden if Map is selected) */}
+        <div className={`md:hidden absolute top-0 left-0 w-full h-full bg-white z-20 transition-transform duration-300 ease-in-out ${
+          mobileTab === 'map' ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'
+        }`}>
+          <Sidebar 
+            config={config} 
+            topics={topics} 
+            connected={connected} 
+            topicVisibility={topicVisibility}
+            onToggleTopicVisibility={toggleTopicVisibility}
+            messages={messages} 
+            messageStats={messageStats}
+            activeTab={mobileTab}
+          />
+        </div>
+
+        {/* Floating toggle button (Desktop only) */}
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className={`absolute z-30 top-4 transition-all duration-300 ease-in-out flex items-center justify-center w-8 h-10 bg-white shadow-md border border-slate-200 rounded-r-md hover:bg-slate-50 text-slate-500 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
+          className={`hidden md:flex absolute z-30 top-4 transition-all duration-300 ease-in-out items-center justify-center w-8 h-10 bg-white shadow-md border border-slate-200 rounded-r-md hover:bg-slate-50 text-slate-500 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
             isSidebarOpen ? 'left-80' : 'left-0'
           }`}
           aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
@@ -87,9 +103,28 @@ export default function App() {
           {isSidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
         </button>
 
-        <main className="flex-1 relative">
+        <main className="flex-1 relative z-10 w-full h-full pb-safe">
           <DeckGLView config={config} waypoints={waypoints} messages={messages} topicVisibility={topicVisibility} />
         </main>
+      </div>
+
+      {/* MOBILE BOTTOM NAVIGATION */}
+      <div className="md:hidden border-t border-slate-200 bg-white/95 backdrop-blur-md flex items-center justify-around h-14 shrink-0 z-30 px-2 pb-safe-bottom">
+        <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'map' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('map')}>
+          <MapIcon size={24} />
+        </button>
+        <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'streams' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('streams')}>
+          <Activity size={24} />
+        </button>
+        <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'transforms' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('transforms')}>
+          <ListTree size={24} />
+        </button>
+        <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'charts' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('charts')}>
+          <LineChart size={24} />
+        </button>
+        <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'info' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('info')}>
+          <Info size={24} />
+        </button>
       </div>
     </div>
   );

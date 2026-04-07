@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Info, Activity, ListTree, LineChart } from 'lucide-react';
 import { AppConfig } from '../hooks/useConfig';
 import { FrameStats, Topic } from '../hooks/useFoxglove';
 import { cn } from '../lib/utils';
@@ -15,39 +16,48 @@ interface SidebarProps {
   onToggleTopicVisibility: (topicName: string) => void;
   messages: Record<string, any[]>;
   messageStats: Record<string, FrameStats>;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
 }
-
-type Tab = 'info' | 'streams' | 'charts' | 'transforms';
 
 export function Sidebar({ 
   config, 
-  topics, 
+  topics,
+  connected,
   topicVisibility, 
   onToggleTopicVisibility, 
   messages, 
-  messageStats 
+  messageStats,
+  activeTab: externalTab,
+  onTabChange
 }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('streams');
+  const [internalTab, setInternalTab] = useState<string>('streams');
+  
+  const activeTab = externalTab !== undefined ? externalTab : internalTab;
+  const setActiveTab = (tab: string) => {
+    setInternalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
 
   return (
-    <div className="w-80 bg-white/95 border-r border-slate-200 flex flex-col h-full shrink-0 backdrop-blur-md">
-      <div className="flex border-b border-slate-200 overflow-x-auto no-scrollbar">
-        <TabButton active={activeTab === 'info'} onClick={() => setActiveTab('info')}>
-          Info
+    <div className="w-full md:w-80 bg-white/95 border-r border-slate-200 flex flex-col h-full shrink-0 backdrop-blur-md">
+      <div className="hidden md:flex border-b border-slate-200 overflow-x-auto no-scrollbar">
+        <TabButton active={activeTab === 'info'} onClick={() => setActiveTab('info')} title="Info">
+          <Info size={20} />
         </TabButton>
-        <TabButton active={activeTab === 'streams'} onClick={() => setActiveTab('streams')}>
-          Streams
+        <TabButton active={activeTab === 'streams'} onClick={() => setActiveTab('streams')} title="Streams">
+          <Activity size={20} />
         </TabButton>
-        <TabButton active={activeTab === 'transforms'} onClick={() => setActiveTab('transforms')}>
-          TF
+        <TabButton active={activeTab === 'transforms'} onClick={() => setActiveTab('transforms')} title="TF">
+          <ListTree size={20} />
         </TabButton>
-        <TabButton active={activeTab === 'charts'} onClick={() => setActiveTab('charts')}>
-          Charts
+        <TabButton active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} title="Charts">
+          <LineChart size={20} />
         </TabButton>
       </div>
       
       <div className="flex-1 overflow-y-auto p-2">
-        {activeTab === 'info' && <InfoPanel config={config} />}
+        {activeTab === 'info' && <InfoPanel config={config} connected={connected} />}
         {activeTab === 'streams' && (
           <StreamsPanel
             topics={topics}
@@ -65,13 +75,14 @@ export function Sidebar({
   );
 }
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabButton({ active, onClick, children, title }: { active: boolean; onClick: () => void; children: React.ReactNode; title?: string }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       className={cn(
-        "flex-1 py-3 text-sm font-medium transition-colors border-b-2",
-        active ? "text-slate-900 border-blue-500 bg-blue-50" : "text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-100"
+        "flex-1 flex justify-center items-center py-3 text-sm font-medium transition-colors border-b-2 outline-none",
+        active ? "text-blue-600 border-blue-500 bg-blue-50" : "text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-100"
       )}
     >
       {children}
