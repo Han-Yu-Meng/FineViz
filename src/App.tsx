@@ -12,7 +12,7 @@ import { DeckGLView } from './components/DeckGLView';
 
 export default function App() {
   const { config, waypoints, loading } = useConfig();
-  const { connected, topics } = useFoxglove(config?.info?.server || '');
+  const { connected, topics, subscribe, messages } = useFoxglove(config?.info?.server || '');
 
   if (loading) {
     return (
@@ -29,9 +29,15 @@ export default function App() {
     <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
       <TopBar config={config} connected={connected} />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar config={config} topics={topics} />
+        <Sidebar 
+          config={config} 
+          topics={topics} 
+          connected={connected} 
+          subscribe={subscribe} 
+          messages={messages} 
+        />
         <main className="flex-1 relative">
-          <DeckGLView config={config} waypoints={waypoints} />
+          <DeckGLView config={config} waypoints={waypoints} messages={messages} />
         </main>
       </div>
     </div>

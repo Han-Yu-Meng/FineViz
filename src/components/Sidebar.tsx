@@ -8,11 +8,15 @@ import { RealtimeChart } from './RealtimeChart';
 interface SidebarProps {
   config: AppConfig | null;
   topics: Topic[];
+  connected: boolean;
+  subscribe: (topicName: string) => void;
+  unsubscribe?: (topicName: string) => void;
+  messages: Record<string, any[]>;
 }
 
 type Tab = 'info' | 'streams' | 'charts';
 
-export function Sidebar({ config, topics }: SidebarProps) {
+export function Sidebar({ config, topics, connected, subscribe, messages }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<Tab>('streams');
 
   return (
@@ -31,7 +35,7 @@ export function Sidebar({ config, topics }: SidebarProps) {
       
       <div className="flex-1 overflow-y-auto p-2">
         {activeTab === 'info' && <InfoPanel config={config} />}
-        {activeTab === 'streams' && <StreamsPanel topics={topics} config={config} />}
+        {activeTab === 'streams' && <StreamsPanel topics={topics} config={config} subscribe={subscribe} messages={messages} />}
         {activeTab === 'charts' && <ChartsPanel config={config} />}
       </div>
     </div>
@@ -72,16 +76,13 @@ function InfoPanel({ config }: { config: AppConfig | null }) {
   );
 }
 
-function StreamsPanel({ topics, config }: { topics: Topic[], config: AppConfig | null }) {
-  // Group topics by their first path segment for a tree view
-  const tree: Record<string, any> = {};
-  
+function StreamsPanel({ topics, config, subscribe, messages }: { topics: Topic[], config: AppConfig | null, subscribe: (topicName: string) => void, messages: Record<string, any[]> }) {
   // If no topics from WS, let's show the ones from config as a fallback/preview
   const displayTopics = topics.length > 0 ? topics.map(t => t.name) : [];
   if (displayTopics.length === 0 && config) {
     Object.values(config.visualize).forEach(v => displayTopics.push(v.topic));
     Object.values(config.service).forEach(s => displayTopics.push(s.topic));
-    Object.values(config.chart).forEach(c => c.forEach((ch: any) => displayTopics.push(ch.topic)));
+    Object.values(config.chart).forEach(c => (c as any[]).forEach((ch: any) => displayTopics.push(ch.topic)));
   }
 
   // Deduplicate and sort
@@ -89,12 +90,30 @@ function StreamsPanel({ topics, config }: { topics: Topic[], config: AppConfig |
 
   return (
     <div className="py-2">
-      {uniqueTopics.map(topic => (
-        <div key={topic} className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800/50 rounded cursor-pointer group">
-          <Activity size={14} className="text-zinc-500 group-hover:text-emerald-400 transition-colors" />
-          <span className="font-mono text-xs truncate">{topic}</span>
-        </div>
-      ))}
+      {uniqueTopics.map((topic, index) => {
+        const hasMessages = (messages[topic] || []).length > 0;
+        return (
+          <div 
+            key={`${topic}-${index}`} 
+            onClick={() => subscribe(topic)}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800/50 rounded cursor-pointer group"
+          >
+            <Activity 
+              size={14} 
+              className={cn(
+                "transition-colors",
+                hasMessages ? "text-emerald-400 animate-pulse" : "text-zinc-500 group-hover:text-emerald-400"
+              )} 
+            />
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="font-mono text-xs truncate">{topic}</span>
+              {hasMessages && (
+                <span className="text-[10px] text-emerald-500/70 font-mono">Receiving data...</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
       {uniqueTopics.length === 0 && (
         <div className="text-zinc-500 text-sm text-center py-8">No topics available</div>
       )}

@@ -1,48 +1,99 @@
 import React, { useState, useEffect } from 'react';
 import DeckGL from '@deck.gl/react';
 import { OrbitView } from '@deck.gl/core';
-import { PointCloudLayer, PathLayer, LineLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { PointCloudLayer, LineLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { AppConfig, Waypoint } from '../hooks/useConfig';
 
 interface DeckGLViewProps {
   config: AppConfig | null;
   waypoints: Waypoint[];
+  messages: Record<string, any[]>;
 }
 
 const INITIAL_VIEW_STATE = {
-  target: [0, 0, 0],
-  zoom: 4,
-  rotationX: 60,
-  rotationOrbit: 30,
+  target: [0, 0, 0] as [number, number, number],
+  zoom: 1, // Start zoomed out for point cloud
+  rotationX: 30,
+  rotationOrbit: 0,
 };
 
-export function DeckGLView({ config, waypoints }: DeckGLViewProps) {
+export function DeckGLView({ config, waypoints, messages }: DeckGLViewProps) {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   
-  // Create some mock data for visualization since we don't have a real backend
-  const [mockPoints, setMockPoints] = useState<any[]>([]);
-  const [mockPath, setMockPath] = useState<any[]>([]);
+  // Real-time point cloud state
+  const [pointCloudData, setPointCloudData] = useState<any[]>([]);
+  
+  useEffect(() => {
+    // Check for /cloud_registered messages
+    const cloudMsgs = messages['/cloud_registered'];
+    if (cloudMsgs && cloudMsgs.length > 0) {
+      const latestMsg = cloudMsgs[cloudMsgs.length - 1];
+      const pointCloudMsg = latestMsg.data;
+      
+      try {
+        if (!pointCloudMsg || !pointCloudMsg.fields || !pointCloudMsg.data) {
+          return;
+        }
+
+        const fields = pointCloudMsg.fields as Array<{ name: string; offset: number }>;
+        const xField = fields.find((f) => f.name === 'x');
+        const yField = fields.find((f) => f.name === 'y');
+        const zField = fields.find((f) => f.name === 'z');
+        if (!xField || !yField || !zField) {
+          console.warn('PointCloud2 缺少 x/y/z 字段，无法渲染');
+          return;
+        }
+
+        const rawData = pointCloudMsg.data;
+        const bytes = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData);
+        const littleEndian = !pointCloudMsg.is_bigendian;
+        const pointStep = pointCloudMsg.point_step as number;
+        const totalPoints = Math.min(
+          (pointCloudMsg.width as number) * (pointCloudMsg.height as number),
+          Math.floor(bytes.byteLength / pointStep),
+        );
+
+        const targetMaxPoints = 120000;
+        const stride = Math.max(1, Math.ceil(totalPoints / targetMaxPoints));
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const points: Array<{ position: [number, number, number]; color: [number, number, number] }> = [];
+
+        for (let i = 0; i < totalPoints; i += stride) {
+          const base = i * pointStep;
+          const x = dv.getFloat32(base + xField.offset, littleEndian);
+          const y = dv.getFloat32(base + yField.offset, littleEndian);
+          const z = dv.getFloat32(base + zField.offset, littleEndian);
+
+          if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+            continue;
+          }
+
+          points.push({
+            position: [x, y, z],
+            color: [255, 255, 255],
+          });
+        }
+
+        console.log('点云解码成功:', {
+          topic: '/cloud_registered',
+          totalPoints,
+          renderedPoints: points.length,
+          pointStep,
+          stride,
+        });
+
+        if (points.length > 0) {
+          setPointCloudData(points);
+        }
+      } catch (e) {
+        console.error("解析点云失败:", e);
+      }
+    }
+  }, [messages['/cloud_registered']]);
+
   const [gridLines, setGridLines] = useState<any[]>([]);
 
   useEffect(() => {
-    // Generate a mock point cloud (a simple grid/floor)
-    const points = [];
-    for (let x = -10; x < 10; x += 0.5) {
-      for (let y = -10; y < 10; y += 0.5) {
-        points.push({
-          position: [x, y, Math.sin(x)*0.2 + Math.cos(y)*0.2],
-          color: [Math.random() * 255, 150, 200]
-        });
-      }
-    }
-    setMockPoints(points);
-
-    // Generate a mock path
-    const path = [
-      { path: [[0, 0, 0], [2, 2, 0], [5, 2, 0], [5, 5, 0]], color: [93, 153, 227] }
-    ];
-    setMockPath(path);
-
     // Generate grid lines
     const lines = [];
     const size = 20;
@@ -69,21 +120,12 @@ export function DeckGLView({ config, waypoints }: DeckGLViewProps) {
     }),
     new PointCloudLayer({
       id: 'point-cloud-layer',
-      data: mockPoints,
+      data: pointCloudData, // Use real data
       getPosition: (d: any) => d.position,
       getNormal: [0, 0, 1],
       getColor: (d: any) => d.color,
-      pointSize: 3,
-    }),
-    new PathLayer({
-      id: 'path-layer',
-      data: mockPath,
-      pickable: true,
-      widthScale: 1,
-      widthMinPixels: 2,
-      getPath: (d: any) => d.path,
-      getColor: (d: any) => d.color,
-      getWidth: (d: any) => 5,
+      sizeUnits: 'pixels',
+      pointSize: 0.2,
     }),
     new ScatterplotLayer({
       id: 'waypoints-layer',
@@ -101,24 +143,13 @@ export function DeckGLView({ config, waypoints }: DeckGLViewProps) {
       getLineColor: [255, 255, 255],
       getRadius: 0.5,
     }),
-    new TextLayer({
-      id: 'waypoints-text-layer',
-      data: waypoints,
-      getPosition: (d: Waypoint) => [d.position.x, d.position.y, d.position.z + 0.5],
-      getText: (d: Waypoint) => d.name,
-      getSize: 16,
-      getColor: [255, 255, 255],
-      getAngle: 0,
-      getTextAnchor: 'middle',
-      getAlignmentBaseline: 'center',
-      background: true,
-      getBackgroundColor: [0, 0, 0, 150],
-      backgroundPadding: [4, 4],
-    })
   ];
 
   return (
-    <div className="relative w-full h-full bg-[#111111] overflow-hidden">
+    <div
+      className="relative w-full h-full bg-[#111111] overflow-hidden"
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {/* Grid background pattern */}
       <div 
         className="absolute inset-0 opacity-20 pointer-events-none"
@@ -130,9 +161,8 @@ export function DeckGLView({ config, waypoints }: DeckGLViewProps) {
       
       <DeckGL
         views={new OrbitView({ id: 'orbit', controller: true })}
-        initialViewState={viewState}
-        onViewStateChange={({ viewState }) => setViewState(viewState)}
-        controller={true}
+        viewState={viewState}
+        onViewStateChange={({ viewState }) => setViewState(viewState as any)}
         layers={layers}
         getCursor={({ isDragging }) => (isDragging ? 'grabbing' : 'grab')}
       />
