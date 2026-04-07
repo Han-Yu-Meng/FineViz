@@ -59,3 +59,8 @@ tf:
   hidden_frame:
     - "livox_frame_192_168_1_198" 
     - "livox_frame_192_168_1_187"
+  fixed_transform:
+    lidar_odom:
+      parent: "odom"
+      position: [0.550, 0.239, 0.193]
+      rotation: [0.011, 0.113, -0.005, 0.994]

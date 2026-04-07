@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import DeckGL from '@deck.gl/react';
 import { OrbitView } from '@deck.gl/core';
-import { PointCloudLayer, LineLayer, TextLayer, PathLayer } from '@deck.gl/layers';
+import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import { AppConfig, Waypoint } from '../hooks/useConfig';
-import { Matrix4, Quaternion, Vector3 } from '@math.gl/core';
+import { Matrix4, Quaternion } from '@math.gl/core';
+
+import { PointCloudBinary, TFLink } from './render/types';
+import { decodePointCloud } from './render/pointCloudDecoder';
+import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
+import { getFrameMatrix } from './render/tfTreeResolver';
 
 interface DeckGLViewProps {
   config: AppConfig | null;
@@ -12,90 +17,13 @@ interface DeckGLViewProps {
   topicVisibility: Record<string, boolean>;
 }
 
-type PointCloudBinary = {
-  length: number;
-  positions: Float32Array;
-  colors: Uint8Array;
-  frameId: string;
-};
-
-interface TFLink {
-  parent: string;
-  child: string;
-  position: [number, number, number];
-  rotation: [number, number, number, number]; // quaternion [x, y, z, w]
-}
-
-function getTurboColor(t: number): [number, number, number] {
-  const x = Math.max(0, Math.min(1, t));
-  const red = 34.61 + x * (1172.33 + x * (-10793.56 + x * (33300.12 + x * (-38394.49 + x * 14825.05))));
-  const green = 23.31 + x * (557.33 + x * (1225.33 + x * (-3574.96 + x * (1073.77 + x * 707.56))));
-  const blue = 27.2 + x * (3211.1 + x * (-15327.97 + x * (27814 + x * (-22569.18 + x * 6838.66))));
-  return [
-    Math.max(0, Math.min(255, Math.round(red))),
-    Math.max(0, Math.min(255, Math.round(green))),
-    Math.max(0, Math.min(255, Math.round(blue))),
-  ];
-}
-
-function readFieldValue(dataView: DataView, byteOffset: number, datatype: number, littleEndian: boolean): number {
-  switch (datatype) {
-    case 1: return dataView.getInt8(byteOffset);
-    case 2: return dataView.getUint8(byteOffset);
-    case 3: return dataView.getInt16(byteOffset, littleEndian);
-    case 4: return dataView.getUint16(byteOffset, littleEndian);
-    case 5: return dataView.getInt32(byteOffset, littleEndian);
-    case 6: return dataView.getUint32(byteOffset, littleEndian);
-    case 7: return dataView.getFloat32(byteOffset, littleEndian);
-    case 8: return dataView.getFloat64(byteOffset, littleEndian);
-    default: return Number.NaN;
-  }
-}
-
-function decodePointCloud(msg: any, colorField: string | undefined, colorScheme: string | undefined, targetMaxPoints: number): PointCloudBinary | null {
-  if (!msg || !msg.fields || !msg.data) return null;
-  const frameId = msg.header?.frame_id || 'map';
-  const fields = msg.fields as any[];
-  const xf = fields.find(f => f.name === 'x'), yf = fields.find(f => f.name === 'y'), zf = fields.find(f => f.name === 'z');
-  if (!xf || !yf || !zf) return null;
-  const cf = colorField ? fields.find(f => f.name === colorField) : undefined;
-  const bytes = msg.data instanceof Uint8Array ? msg.data : new Uint8Array(msg.data);
-  const le = !msg.is_bigendian, step = msg.point_step, total = Math.min(msg.width * msg.height, Math.floor(bytes.byteLength / step));
-  const stride = Math.max(1, Math.ceil(total / targetMaxPoints));
-  const count = Math.ceil(total / stride);
-  const pos = new Float32Array(count * 3), col = new Uint8Array(count * 3), vals = cf ? new Float32Array(count) : null;
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let min = Infinity, max = -Infinity, idx = 0;
-  for (let i = 0; i < total && idx < count; i += stride) {
-    const b = i * step;
-    if (b + Math.max(xf.offset, yf.offset, zf.offset) + 4 > dv.byteLength) break;
-    const x = dv.getFloat32(b + xf.offset, le), y = dv.getFloat32(b + yf.offset, le), z = dv.getFloat32(b + zf.offset, le);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-    pos[idx * 3] = x; pos[idx * 3 + 1] = y; pos[idx * 3 + 2] = z;
-    if (cf && vals) {
-      const v = readFieldValue(dv, b + cf.offset, cf.datatype, le);
-      if (Number.isFinite(v)) { vals[idx] = v; min = Math.min(min, v); max = Math.max(max, v); }
-    } else { col[idx * 3] = 255; col[idx * 3 + 1] = 255; col[idx * 3 + 2] = 255; }
-    idx++;
-  }
-  if (idx === 0) return null;
-  const fPos = pos.subarray(0, idx * 3), fCol = col.subarray(0, idx * 3);
-  if (cf && colorScheme === 'turbo' && isFinite(min) && isFinite(max) && vals) {
-    const r = Math.max(1e-6, max - min);
-    for (let i = 0; i < idx; i++) {
-        const [rv, gv, bv] = getTurboColor((vals[i] - min) / r);
-        fCol[i * 3] = rv; fCol[i * 3 + 1] = gv; fCol[i * 3 + 2] = bv;
-    }
-  }
-  return { length: idx, positions: fPos as Float32Array, colors: fCol as Uint8Array, frameId };
-}
-
 export function DeckGLView({ config, waypoints, messages, topicVisibility }: DeckGLViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
   const [viewState, setViewState] = useState({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
   const [renderFps, setRenderFps] = useState(0);
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
   const [pathData, setPathData] = useState<Record<string, any>>({});
+  const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
 
   const fTimesRef = useRef<number[]>([]);
@@ -176,6 +104,20 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     }
     setPathData(nextPaths);
 
+    // --- Update Marker Arrays ---
+    const markerConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'visualization_msgs/msg/MarkerArray' && item?.topic);
+    const nextMarkers: Record<string, Record<string, MarkerPrimitive[]>> = {};
+    for (const c of markerConfigs as any[]) {
+      if (!(vis[c.topic] ?? true)) continue;
+      const m = msgs[c.topic] || [];
+      if (m.length === 0) continue;
+      const latestMsg = m[m.length - 1]; // MarkerArray arrays usually redraw fully
+      
+      const md = decodeMarkerArray(latestMsg.data);
+      nextMarkers[c.topic] = md;
+    }
+    setMarkerData(nextMarkers);
+
     // --- Update TF Tree ---
     const rawTf = [...(msgs['/tf'] || []), ...(msgs['/tf_static'] || [])];
     if (rawTf.length > 0) {
@@ -224,15 +166,19 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
           console.warn(`[TF Bug Hunt] lidar_odom is completely MISSING from rawTf! Total messages: ${rawTf.length}. Frames present:`, Array.from(seenFrames));
         }
 
-        // Hack: hardcode lidar_odom static transform since rosbag2 tf_static clipping loses it
-        if (!next['lidar_odom']) {
-          next['lidar_odom'] = {
-            parent: 'odom', // as seen in tf2_echo
-            child: 'lidar_odom',
-            position: [0.550, 0.239, 0.193], // from tf2_echo odom -> lidar_odom
-            rotation: [0.011, 0.113, -0.005, 0.994] 
-          };
-          changed = true;
+        // Apply configured fixed transforms (helpful for missing /tf_static from bag playback)
+        if (cfg.tf?.fixed_transform) {
+          Object.entries(cfg.tf.fixed_transform).forEach(([childFrameId, transform]: [string, any]) => {
+            if (!next[childFrameId]) {
+              next[childFrameId] = {
+                parent: transform.parent,
+                child: childFrameId,
+                position: transform.position,
+                rotation: transform.rotation
+              };
+              changed = true;
+            }
+          });
         }
 
         return changed ? next : prev;
@@ -255,44 +201,6 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     const timer = setInterval(() => setRenderFps(fTimesRef.current.length), 1000);
     return () => clearInterval(timer);
   }, []);
-
-  const getFrameMatrix = useCallback((frameId: string, tree: Record<string, TFLink>): Matrix4 => {
-    const mat = new Matrix4();
-    if (!frameId || frameId === fixedFrame) return mat;
-
-    let current = frameId;
-    const path: TFLink[] = [];
-    const visited = new Set<string>();
-
-    while (current !== fixedFrame && tree[current]) {
-      if (visited.has(current)) break;
-      visited.add(current);
-      
-      const link = tree[current];
-      path.push(link);
-      current = link.parent;
-    }
-
-    if (current !== fixedFrame) {
-      if (frameId === 'lidar_odom') {
-        console.warn(`[TF Path Failure] Cannot find path from lidar_odom to ${fixedFrame}. Current reached: ${current}. Tree keys:`, Object.keys(tree));
-      }
-      return new Matrix4(); 
-    }
-
-    for (let i = path.length - 1; i >= 0; i--) {
-      const link = path[i];
-      // 构造从父系到子系的变换矩阵 T_parent_child = Translate(link.position) * Rotate(link.rotation)
-      const m = new Matrix4().fromQuaternion(link.rotation);
-      m[12] = link.position[0];
-      m[13] = link.position[1];
-      m[14] = link.position[2];
-      
-      // 级联变换：mat = mat * m
-      mat.multiplyRight(m);
-    }
-    return mat;
-  }, [fixedFrame]);
 
   // Debug: Print current TF tree nodes
   useEffect(() => {
@@ -317,17 +225,11 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     labelData.push({ text: fixedFrame, position: [0, 0, 0] });
 
     links.forEach(link => {
-      const worldMat = getFrameMatrix(link.child, tfTree);
-      const parentMat = getFrameMatrix(link.parent, tfTree);
+      const worldMat = getFrameMatrix(link.child, tfTree, fixedFrame);
+      const parentMat = getFrameMatrix(link.parent, tfTree, fixedFrame);
       
       const pos = worldMat.getTranslation();
       const pPos = parentMat.getTranslation();
-
-      // Debug log for TF Hierarchy visualization
-      if (link.child === 'lidar_odom' || link.child === 'odom') {
-        console.log(`[TF Debug] link: ${link.parent} -> ${link.child}`);
-        console.log(`[TF Debug] World Translation: [${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)}]`);
-      }
 
       lineData.push({ source: pPos, target: pos });
 
@@ -375,7 +277,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         getPixelOffset: [5, 5]
       })
     ];
-  }, [tfTree, getFrameMatrix, fixedFrame]);
+  }, [tfTree, fixedFrame]);
 
   const layers = useMemo(() => [
     new LineLayer({
@@ -386,11 +288,12 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       getColor: [80, 80, 80, 100]
     }),
     ...Object.entries(pointCloudData).map(([t, d]) => {
-      const mat4 = getFrameMatrix(d.frameId, tfTree);
+      const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
       const modelMatrix = mat4.toArray();
       
       // Debug log for transformation troubleshooting
       if (t.includes('registered') || d.frameId !== fixedFrame) {
+
         const trans = mat4.getTranslation();
         console.log(`[PointCloud Debug] topic: ${t}, frame_id: ${d.frameId}, fixed_frame: ${fixedFrame}`);
         console.log(`[PointCloud Debug] World Matrix Translation: [${trans[0].toFixed(3)}, ${trans[1].toFixed(3)}, ${trans[2].toFixed(3)}]`);
@@ -408,10 +311,11 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       });
     }),
     ...Object.entries(pathData).map(([t, d]) => {
-      const mat4 = getFrameMatrix(d.frameId, tfTree);
+      const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
       const modelMatrix = mat4.toArray();
 
       return new PathLayer({
+
         id: `path-${t}-${d.frameId}`,
         data: [{ path: d.path, color: d.color, width: d.width }],
         pickable: false,
@@ -426,8 +330,79 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         }
       });
     }),
+    ...Object.entries(markerData).flatMap(([t, frames]) => {
+      return Object.entries(frames).flatMap(([frameId, markers]) => {
+        const mat4 = getFrameMatrix(frameId, tfTree, fixedFrame);
+        const modelMatrix = mat4.toArray();
+
+        const layers: any[] = [];
+        
+        // 2: SPHERE or 8: POINTS. SPHERE gives local pose center, points use array
+        const spheres = markers.filter(m => m.type === 2);
+        if (spheres.length > 0) {
+          layers.push(new ScatterplotLayer({
+            id: `marker-sphere-${t}-${frameId}`,
+            data: spheres,
+            getPosition: (d: MarkerPrimitive) => d.position,
+            getFillColor: (d: MarkerPrimitive) => d.color,
+            getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, // assume uniform scale or X as radius
+            radiusUnits: 'meters',
+            modelMatrix: modelMatrix,
+            updateTriggers: { modelMatrix: [modelMatrix] }
+          }));
+        }
+
+        // 4: LINE_STRIP. Use PathLayer. Points are provided in array.
+        const lineStrips = markers.filter(m => m.type === 4);
+        if (lineStrips.length > 0) {
+          layers.push(new PathLayer({
+            id: `marker-linestrip-${t}-${frameId}`,
+            data: lineStrips,
+            getPath: (d: MarkerPrimitive) => d.points,
+            getColor: (d: MarkerPrimitive) => d.color,
+            getWidth: (d: MarkerPrimitive) => d.scale[0],
+            widthUnits: 'meters',
+            modelMatrix: modelMatrix,
+            updateTriggers: { modelMatrix: [modelMatrix] }
+          }));
+        }
+
+        // 5: LINE_LIST. Use LineLayer
+        const lineLists = markers.filter(m => m.type === 5);
+        if (lineLists.length > 0) {
+          const linesData = lineLists.flatMap(m => {
+            const pairs = [];
+            for (let i = 0; i < m.points.length; i += 2) {
+              if (i + 1 < m.points.length) {
+                pairs.push({
+                  source: m.points[i],
+                  target: m.points[i + 1],
+                  color: m.color,
+                  width: m.scale[0]
+                });
+              }
+            }
+            return pairs;
+          });
+
+          layers.push(new LineLayer({
+            id: `marker-linelist-${t}-${frameId}`,
+            data: linesData,
+            getSourcePosition: (d: any) => d.source,
+            getTargetPosition: (d: any) => d.target,
+            getColor: (d: any) => d.color,
+            getWidth: (d: any) => d.width,
+            widthUnits: 'meters',
+            modelMatrix: modelMatrix,
+            updateTriggers: { modelMatrix: [modelMatrix] }
+          }));
+        }
+
+        return layers;
+      });
+    }),
     ...tfLayers
-  ], [pointCloudData, pathData, tfLayers, getFrameMatrix, tfTree]);
+  ], [pointCloudData, pathData, markerData, tfLayers, tfTree, fixedFrame]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
