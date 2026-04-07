@@ -58,7 +58,14 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         const mP = new Float32Array(tLen * 3), mC = new Uint8Array(tLen * 3);
         let off = 0;
         for (const f of res) { mP.set(f.positions, off * 3); mC.set(f.colors, off * 3); off += f.length; }
-        nextPc[c.topic] = { length: tLen, positions: mP, colors: mC, frameId: res[0].frameId };
+        nextPc[c.topic] = { 
+          length: tLen, 
+          positions: mP, 
+          colors: mC, 
+          frameId: res[0].frameId,
+          pointSize: c.point_size,
+          alpha: c.alpha
+        };
       }
     }
     setPointCloudData(nextPc);
@@ -159,12 +166,6 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
             }
           });
         });
-        
-        // Log if lidar_odom is missing from the raw messages
-        const hasLidarOdom = Array.from(seenFrames).some(f => f.includes('lidar_odom'));
-        if (!hasLidarOdom && rawTf.length > 0) {
-          console.warn(`[TF Bug Hunt] lidar_odom is completely MISSING from rawTf! Total messages: ${rawTf.length}. Frames present:`, Array.from(seenFrames));
-        }
 
         // Apply configured fixed transforms (helpful for missing /tf_static from bag playback)
         if (cfg.tf?.fixed_transform) {
@@ -303,7 +304,8 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         id: `${t}-${d.frameId}`, // Include frameId in ID to force layer recreation if frame changes
         data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
         sizeUnits: 'pixels',
-        pointSize: 1.5,
+        pointSize: d.pointSize ?? 1.5,
+        opacity: d.alpha ?? 1.0,
         modelMatrix: modelMatrix,
         updateTriggers: {
           modelMatrix: [modelMatrix]

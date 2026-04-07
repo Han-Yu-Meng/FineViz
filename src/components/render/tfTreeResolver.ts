@@ -19,9 +19,6 @@ export function getFrameMatrix(frameId: string, tree: Record<string, TFLink>, fi
   }
 
   if (current !== fixedFrame) {
-    if (frameId === 'lidar_odom') {
-      console.warn(`[TF Path Failure] Cannot find path from lidar_odom to ${fixedFrame}. Current reached: ${current}. Tree keys:`, Object.keys(tree));
-    }
     return new Matrix4(); 
   }
 

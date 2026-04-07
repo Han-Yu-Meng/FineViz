@@ -9,16 +9,20 @@ visualize:
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: true
     last_time: 2
+    point_size: 1
     color_field: "intensity"
     color_scheme: "turbo"
+    alpha: 0.8
     
   global_map:
     topic: "/global_map"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: false
     last_time: 0
+    point_size: 1.5
     color_field: "z"
     color_scheme: "turbo"
+    alpha: 0.8
   
   plan:
     topic: "/plan"
@@ -31,6 +35,7 @@ visualize:
   trajectories:
     topic: "/trajectories"
     type: "visualization_msgs/msg/MarkerArray"
+    alpha: 0.8
  
 service:
   Startup:

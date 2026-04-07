@@ -3,6 +3,8 @@ export type PointCloudBinary = {
   positions: Float32Array;
   colors: Uint8Array;
   frameId: string;
+  pointSize?: number;
+  alpha?: number;
 };
 
 export interface TFLink {
