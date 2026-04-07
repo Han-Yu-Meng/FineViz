@@ -192,9 +192,21 @@ export function useFoxglove(url: string) {
       if (!messageBufferRef.current[topicName]) {
         messageBufferRef.current[topicName] = [];
       }
-      // 针对大数据结构，限制历史消息数量来释放内存
-      const isLargeData = topic.schemaName === 'sensor_msgs/msg/PointCloud2' || topic.schemaName === 'sensor_msgs/msg/Image';
-      const MAX_LENGTH = isLargeData ? 2 : 50; 
+      
+      // 针对各种类型进行历史上限区分，极大缓解移动端 OOM 和 GC (垃圾回收) 带来的假死卡顿！
+      let MAX_LENGTH = 10; // 一般状态面板、图表只需少量连续点
+      const schemaName = topic.schemaName || '';
+      
+      if (
+        schemaName === 'sensor_msgs/msg/PointCloud2' || 
+        schemaName === 'sensor_msgs/msg/Image' ||
+        schemaName === 'sensor_msgs/msg/LaserScan' ||
+        schemaName === 'nav_msgs/msg/Path' || 
+        schemaName === 'tf2_msgs/msg/TFMessage'
+      ) {
+        // 渲染视口、TF树每次仅仅需要最新鲜的坐标！旧数组立即剔除，否则 200Hz 的 TF 将制造上万个游离对象
+        MAX_LENGTH = 2; 
+      }
       
       const buffer = messageBufferRef.current[topicName];
       buffer.push(newMessage);

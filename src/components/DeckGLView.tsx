@@ -5,6 +5,7 @@ import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer } fr
 import { AppConfig, Waypoint } from '../hooks/useConfig';
 import { Matrix4, Quaternion } from '@math.gl/core';
 
+import { Maximize, Minimize } from 'lucide-react';
 import { PointCloudBinary, TFLink } from './render/types';
 import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
@@ -25,6 +26,25 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   const [pathData, setPathData] = useState<Record<string, any>>({});
   const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  };
 
   const fTimesRef = useRef<number[]>([]);
   const lMsgs = useRef(messages);
@@ -430,8 +450,17 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         onAfterRender={onAfterRender}
         layers={layers}
       />
-      <div className="absolute bottom-4 right-4 bg-white/80 p-2 rounded text-xs font-mono shadow">
-        Points: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: {renderFps}
+      <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        <div className="bg-white/80 backdrop-blur-sm p-2 rounded text-xs font-mono shadow text-slate-700">
+          Pts: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: {renderFps}
+        </div>
+        <button 
+          onClick={toggleFullscreen}
+          className="bg-white/80 backdrop-blur-sm p-1.5 rounded shadow text-slate-600 hover:text-blue-600 focus:outline-none transition-colors"
+          title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+        >
+          {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+        </button>
       </div>
     </div>
   );
