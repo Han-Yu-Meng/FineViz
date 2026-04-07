@@ -57,7 +57,7 @@ export function useFoxglove(url: string) {
         }
         return changed ? next : prev;
       });
-    }, 100); // 10Hz 的 React 状态同步率
+    }, 50); // 20Hz 的 React 状态同步率
     return () => clearInterval(timer);
   }, []);
 
@@ -193,20 +193,9 @@ export function useFoxglove(url: string) {
         messageBufferRef.current[topicName] = [];
       }
       
-      // 针对各种类型进行历史上限区分，极大缓解移动端 OOM 和 GC (垃圾回收) 带来的假死卡顿！
-      let MAX_LENGTH = 10; // 一般状态面板、图表只需少量连续点
-      const schemaName = topic.schemaName || '';
-      
-      if (
-        schemaName === 'sensor_msgs/msg/PointCloud2' || 
-        schemaName === 'sensor_msgs/msg/Image' ||
-        schemaName === 'sensor_msgs/msg/LaserScan' ||
-        schemaName === 'nav_msgs/msg/Path' || 
-        schemaName === 'tf2_msgs/msg/TFMessage'
-      ) {
-        // 渲染视口、TF树每次仅仅需要最新鲜的坐标！旧数组立即剔除，否则 200Hz 的 TF 将制造上万个游离对象
-        MAX_LENGTH = 2; 
-      }
+      // 所有话题统一仅保留最新的 2 帧！！(1 帧应用，1 帧后备缓冲)。历史轨迹需求下放到各个特定的子图表组件内部用极简数据(例如数字 array)自行缓存！
+      // 否则在 200Hz 场景下堆积任何原始 ROS 树包到主引擎中都会引发数兆每秒级的分配导致的 GC 和发热死机。
+      const MAX_LENGTH = 2; 
       
       const buffer = messageBufferRef.current[topicName];
       buffer.push(newMessage);

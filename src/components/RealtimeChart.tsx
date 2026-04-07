@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 
 interface RealtimeChartProps {
@@ -13,16 +13,35 @@ function getNestedValue(obj: any, path: string): number {
 }
 
 export function RealtimeChart({ topic, fields, colors, messages }: RealtimeChartProps) {
-  const chartData = useMemo(() => {
-    // Process the last 50 messages to render in the chart
-    const recentMessages = messages.slice(-50);
-    return recentMessages.map((msg, index) => {
-      const point: any = { time: msg.receivedAt || index };
-      fields.forEach((field) => {
-        point[field] = getNestedValue(msg.data, field);
-      });
-      return point;
-    });
+  const [chartData, setChartData] = useState<any[]>([]);
+  const historyRef = useRef<any[]>([]);
+  const lastProcessedTime = useRef<number>(0);
+
+  useEffect(() => {
+    if (!messages || messages.length === 0) return;
+    
+    let hasNew = false;
+    const currentHistory = historyRef.current;
+
+    for (const msg of messages) {
+      if (msg.receivedAt > lastProcessedTime.current) {
+        lastProcessedTime.current = msg.receivedAt;
+        const point: any = { time: msg.receivedAt };
+        fields.forEach((field) => {
+          point[field] = getNestedValue(msg.data, field);
+        });
+        currentHistory.push(point);
+        hasNew = true;
+      }
+    }
+
+    if (hasNew) {
+      // 保持图表的平滑滚动记录（例如50~100个采样点）而无需在主循环中维持巨型原始消息对象
+      if (currentHistory.length > 50) {
+        currentHistory.shift();
+      }
+      setChartData([...currentHistory]);
+    }
   }, [messages, fields]);
 
   return (

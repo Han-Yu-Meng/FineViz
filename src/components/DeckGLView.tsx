@@ -214,7 +214,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(runDecode, 150);
+    const timer = setInterval(runDecode, 50);
     return () => clearInterval(timer);
   }, [runDecode]);
 
