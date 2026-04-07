@@ -407,8 +407,27 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         }
       });
     }),
+    ...Object.entries(pathData).map(([t, d]) => {
+      const mat4 = getFrameMatrix(d.frameId, tfTree);
+      const modelMatrix = mat4.toArray();
+
+      return new PathLayer({
+        id: `path-${t}-${d.frameId}`,
+        data: [{ path: d.path, color: d.color, width: d.width }],
+        pickable: false,
+        widthScale: 1,
+        widthMinPixels: 2,
+        getPath: (p: any) => p.path,
+        getColor: (p: any) => p.color,
+        getWidth: (p: any) => p.width,
+        modelMatrix: modelMatrix,
+        updateTriggers: {
+          modelMatrix: [modelMatrix]
+        }
+      });
+    }),
     ...tfLayers
-  ], [pointCloudData, tfLayers, getFrameMatrix, tfTree]);
+  ], [pointCloudData, pathData, tfLayers, getFrameMatrix, tfTree]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>

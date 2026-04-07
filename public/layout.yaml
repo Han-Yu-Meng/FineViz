@@ -24,9 +24,9 @@ visualize:
     topic: "/plan"
     type: "nav_msgs/msg/Path"
     listen_updates: true
-    width: 5
+    width: 0.8
     color: "#5D99E3"
-    alpha: 0.7
+    alpha: 0.9
   
   trajectories:
     topic: "/trajectories"
