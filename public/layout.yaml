@@ -21,7 +21,7 @@ visualize:
     last_time: 0
     point_size: 1.5
     color_field: "z"
-    color_scheme: "turbo"
+    color_scheme: "warm"
     alpha: 0.8
   
   plan:

@@ -1,5 +1,14 @@
 import { PointCloudBinary } from './types';
 
+export function getWarmColor(t: number): [number, number, number] {
+  const x = Math.max(0, Math.min(1, t));
+  return [
+    Math.min(255, Math.max(0, Math.round(255 * (x * 3)))),
+    Math.min(255, Math.max(0, Math.round(255 * (x * 3 - 1)))),
+    Math.min(255, Math.max(0, Math.round(255 * (x * 3 - 2)))),
+  ];
+}
+
 export function getTurboColor(t: number): [number, number, number] {
   const x = Math.max(0, Math.min(1, t));
   const red = 34.61 + x * (1172.33 + x * (-10793.56 + x * (33300.12 + x * (-38394.49 + x * 14825.05))));
@@ -54,10 +63,12 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
   }
   if (idx === 0) return null;
   const fPos = pos.subarray(0, idx * 3), fCol = col.subarray(0, idx * 3);
-  if (cf && colorScheme === 'turbo' && isFinite(min) && isFinite(max) && vals) {
+  if (cf && ['turbo', 'warm'].includes(colorScheme || '') && isFinite(min) && isFinite(max) && vals) {
     const r = Math.max(1e-6, max - min);
     for (let i = 0; i < idx; i++) {
-        const [rv, gv, bv] = getTurboColor((vals[i] - min) / r);
+        const [rv, gv, bv] = colorScheme === 'warm' 
+            ? getWarmColor((vals[i] - min) / r)
+            : getTurboColor((vals[i] - min) / r);
         fCol[i * 3] = rv; fCol[i * 3 + 1] = gv; fCol[i * 3 + 2] = bv;
     }
   }
