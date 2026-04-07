@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import DeckGL from '@deck.gl/react';
 import { OrbitView } from '@deck.gl/core';
-import { PointCloudLayer, LineLayer, TextLayer } from '@deck.gl/layers';
+import { PointCloudLayer, LineLayer, TextLayer, PathLayer } from '@deck.gl/layers';
 import { AppConfig, Waypoint } from '../hooks/useConfig';
 import { Matrix4, Quaternion, Vector3 } from '@math.gl/core';
 
@@ -95,6 +95,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   const [viewState, setViewState] = useState({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
   const [renderFps, setRenderFps] = useState(0);
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
+  const [pathData, setPathData] = useState<Record<string, any>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
 
   const fTimesRef = useRef<number[]>([]);
@@ -117,7 +118,13 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       if (m.length === 0) continue;
       const sel = c.listen_updates ? (c.last_time > 0 ? m.filter((msg: any) => (msg.receivedAt || 0) >= now - c.last_time * 1000) : [m[m.length - 1]]) : [m[m.length - 1]];
       
-      const res = sel.map(s => decodePointCloud(s.data, c.color_field, c.color_scheme, 100000)).filter(r => r !== null) as PointCloudBinary[];
+      const res = sel.map(s => {
+        const decoded = decodePointCloud(s.data, c.color_field, c.color_scheme, 100000);
+        if (decoded && decoded.frameId.startsWith('/')) {
+          decoded.frameId = decoded.frameId.substring(1);
+        }
+        return decoded;
+      }).filter(r => r !== null) as PointCloudBinary[];
       if (res.length > 0) {
         const tLen = res.reduce((s, f) => s + f.length, 0);
         const mP = new Float32Array(tLen * 3), mC = new Uint8Array(tLen * 3);
@@ -128,22 +135,107 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     }
     setPointCloudData(nextPc);
 
+    // --- Update Path Data ---
+    const pathConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'nav_msgs/msg/Path' && item?.topic);
+    const nextPaths: Record<string, any> = {};
+    for (const c of pathConfigs as any[]) {
+      if (!(vis[c.topic] ?? true)) continue;
+      const m = msgs[c.topic] || [];
+      if (m.length === 0) continue;
+      
+      const sel = c.listen_updates ? (c.last_time > 0 ? m.filter((msg: any) => (msg.receivedAt || 0) >= now - c.last_time * 1000) : [m[m.length - 1]]) : [m[m.length - 1]];
+      if (sel.length === 0) continue;
+
+      const latestPathMsg = sel[sel.length - 1];
+      if (!latestPathMsg.data?.poses) continue;
+      
+      const poses = latestPathMsg.data.poses;
+      const pathPoints = poses.map((p: any) => [
+        p.pose.position.x,
+        p.pose.position.y,
+        p.pose.position.z || 0
+      ]);
+
+      let frameId = latestPathMsg.data.header?.frame_id || 'map';
+      if (frameId.startsWith('/')) frameId = frameId.substring(1);
+
+      let r = 93, g = 153, b = 227, a = Math.floor((c.alpha || 1.0) * 255);
+      if (c.color && c.color.startsWith('#')) {
+        const hex = c.color.substring(1);
+        r = parseInt(hex.substring(0, 2), 16) || r;
+        g = parseInt(hex.substring(2, 4), 16) || g;
+        b = parseInt(hex.substring(4, 6), 16) || b;
+      }
+
+      nextPaths[c.topic] = {
+        path: pathPoints,
+        frameId,
+        color: [r, g, b, a],
+        width: c.width || 3
+      };
+    }
+    setPathData(nextPaths);
+
     // --- Update TF Tree ---
     const rawTf = [...(msgs['/tf'] || []), ...(msgs['/tf_static'] || [])];
     if (rawTf.length > 0) {
       setTfTree(prev => {
         const next = { ...prev };
+        let changed = false;
+        
+        // DEBUG: Collect all child frame IDs we see in this decode loop
+        const seenFrames = new Set<string>();
+
         rawTf.forEach(msg => {
-          (msg.data.transforms || []).forEach((t: any) => {
-            next[t.child_frame_id] = {
-              parent: t.header.frame_id,
-              child: t.child_frame_id,
-              position: [t.transform.translation.x, t.transform.translation.y, t.transform.translation.z],
-              rotation: [t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w]
-            };
+          const transforms = msg.data?.transforms || msg.transforms || [];
+          transforms.forEach((t: any) => {
+            const childFrameId = t.child_frame_id.startsWith('/') ? t.child_frame_id.substring(1) : t.child_frame_id;
+            const parentFrameId = t.header.frame_id.startsWith('/') ? t.header.frame_id.substring(1) : t.header.frame_id;
+            
+            seenFrames.add(`${parentFrameId}->${childFrameId}`);
+            
+            const existing = next[childFrameId];
+
+            const isDifferent = !existing || 
+              existing.parent !== parentFrameId ||
+              existing.position[0] !== t.transform.translation.x ||
+              existing.position[1] !== t.transform.translation.y ||
+              existing.position[2] !== t.transform.translation.z ||
+              existing.rotation[0] !== t.transform.rotation.x ||
+              existing.rotation[1] !== t.transform.rotation.y ||
+              existing.rotation[2] !== t.transform.rotation.z ||
+              existing.rotation[3] !== t.transform.rotation.w;
+
+            if (isDifferent) {
+              next[childFrameId] = {
+                parent: parentFrameId,
+                child: childFrameId,
+                position: [t.transform.translation.x, t.transform.translation.y, t.transform.translation.z],
+                rotation: [t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w]
+              };
+              changed = true;
+            }
           });
         });
-        return next;
+        
+        // Log if lidar_odom is missing from the raw messages
+        const hasLidarOdom = Array.from(seenFrames).some(f => f.includes('lidar_odom'));
+        if (!hasLidarOdom && rawTf.length > 0) {
+          console.warn(`[TF Bug Hunt] lidar_odom is completely MISSING from rawTf! Total messages: ${rawTf.length}. Frames present:`, Array.from(seenFrames));
+        }
+
+        // Hack: hardcode lidar_odom static transform since rosbag2 tf_static clipping loses it
+        if (!next['lidar_odom']) {
+          next['lidar_odom'] = {
+            parent: 'odom', // as seen in tf2_echo
+            child: 'lidar_odom',
+            position: [0.550, 0.239, 0.193], // from tf2_echo odom -> lidar_odom
+            rotation: [0.011, 0.113, -0.005, 0.994] 
+          };
+          changed = true;
+        }
+
+        return changed ? next : prev;
       });
     }
   }, []);
@@ -166,26 +258,48 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
 
   const getFrameMatrix = useCallback((frameId: string, tree: Record<string, TFLink>): Matrix4 => {
     const mat = new Matrix4();
-    if (frameId === fixedFrame) return mat;
+    if (!frameId || frameId === fixedFrame) return mat;
 
     let current = frameId;
     const path: TFLink[] = [];
+    const visited = new Set<string>();
+
     while (current !== fixedFrame && tree[current]) {
+      if (visited.has(current)) break;
+      visited.add(current);
+      
       const link = tree[current];
       path.push(link);
       current = link.parent;
     }
 
+    if (current !== fixedFrame) {
+      if (frameId === 'lidar_odom') {
+        console.warn(`[TF Path Failure] Cannot find path from lidar_odom to ${fixedFrame}. Current reached: ${current}. Tree keys:`, Object.keys(tree));
+      }
+      return new Matrix4(); 
+    }
+
     for (let i = path.length - 1; i >= 0; i--) {
       const link = path[i];
+      // 构造从父系到子系的变换矩阵 T_parent_child = Translate(link.position) * Rotate(link.rotation)
       const m = new Matrix4().fromQuaternion(link.rotation);
       m[12] = link.position[0];
       m[13] = link.position[1];
       m[14] = link.position[2];
+      
+      // 级联变换：mat = mat * m
       mat.multiplyRight(m);
     }
     return mat;
   }, [fixedFrame]);
+
+  // Debug: Print current TF tree nodes
+  useEffect(() => {
+    if (Object.keys(tfTree).length > 0) {
+      console.log("[TF Tree Status] Frames in tree:", Object.keys(tfTree));
+    }
+  }, [tfTree]);
 
   const tfLayers = useMemo(() => {
     const links = Object.values(tfTree);
@@ -208,6 +322,12 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       
       const pos = worldMat.getTranslation();
       const pPos = parentMat.getTranslation();
+
+      // Debug log for TF Hierarchy visualization
+      if (link.child === 'lidar_odom' || link.child === 'odom') {
+        console.log(`[TF Debug] link: ${link.parent} -> ${link.child}`);
+        console.log(`[TF Debug] World Translation: [${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)}]`);
+      }
 
       lineData.push({ source: pPos, target: pos });
 
@@ -266,13 +386,25 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       getColor: [80, 80, 80, 100]
     }),
     ...Object.entries(pointCloudData).map(([t, d]) => {
-      const modelMatrix = getFrameMatrix(d.frameId, tfTree).toArray();
+      const mat4 = getFrameMatrix(d.frameId, tfTree);
+      const modelMatrix = mat4.toArray();
+      
+      // Debug log for transformation troubleshooting
+      if (t.includes('registered') || d.frameId !== fixedFrame) {
+        const trans = mat4.getTranslation();
+        console.log(`[PointCloud Debug] topic: ${t}, frame_id: ${d.frameId}, fixed_frame: ${fixedFrame}`);
+        console.log(`[PointCloud Debug] World Matrix Translation: [${trans[0].toFixed(3)}, ${trans[1].toFixed(3)}, ${trans[2].toFixed(3)}]`);
+      }
+
       return new PointCloudLayer({
-        id: t,
+        id: `${t}-${d.frameId}`, // Include frameId in ID to force layer recreation if frame changes
         data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
         sizeUnits: 'pixels',
         pointSize: 1.5,
-        modelMatrix: modelMatrix
+        modelMatrix: modelMatrix,
+        updateTriggers: {
+          modelMatrix: [modelMatrix]
+        }
       });
     }),
     ...tfLayers
@@ -295,11 +427,6 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         onAfterRender={onAfterRender}
         layers={layers}
       />
-      <div className="absolute top-4 left-4 pointer-events-none">
-        <div className="bg-white/80 backdrop-blur px-2 py-1 rounded text-[10px] uppercase tracking-tighter text-slate-500 font-bold border border-slate-200">
-          Fixed Frame: {fixedFrame}
-        </div>
-      </div>
       <div className="absolute bottom-4 right-4 bg-white/80 p-2 rounded text-xs font-mono shadow">
         Points: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: {renderFps}
       </div>
