@@ -33,17 +33,17 @@ visualize:
     type: "visualization_msgs/msg/MarkerArray"
  
 service:
-  startup:
+  Startup:
     topic: "/wheelchair/startup"
     type: "std_srvs/srv/Trigger"
     icon: "Power"
     
-  shutdown:
+  Shutdown:
     topic: "/wheelchair/shutdown"
     type: "std_srvs/srv/Trigger"
     icon: "PowerOff" 
    
-  set_speed:
+  SetSpeed:
     topic: "/wheelchair/set_speed"
     type: "wheelchair_msgs/srv/SetSpeed"
     icon: "Gauge"

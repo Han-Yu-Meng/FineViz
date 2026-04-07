@@ -10,15 +10,23 @@ export interface Topic {
   schema?: string;
 }
 
+export interface FrameStats {
+  fps: number;
+  totalFrames: number;
+}
+
 export function useFoxglove(url: string) {
   const [client, setClient] = useState<FoxgloveClient | null>(null);
   const [connected, setConnected] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [messages, setMessages] = useState<Record<string, any[]>>({});
+  const [messageStats, setMessageStats] = useState<Record<string, FrameStats>>({});
   
   const wsRef = useRef<WebSocket | null>(null);
   const topicsRef = useRef<Topic[]>([]);
   const readersRef = useRef<Map<number, MessageReader>>(new Map());
+  const frameTimesRef = useRef<Map<string, number[]>>(new Map());
+  const frameCountsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (!url) return;
@@ -53,6 +61,9 @@ export function useFoxglove(url: string) {
     foxgloveClient.on("close", () => {
       setConnected(false);
       setTopics([]);
+      setMessageStats({});
+      frameTimesRef.current.clear();
+      frameCountsRef.current.clear();
     });
 
     foxgloveClient.on("advertise", (newTopics) => {
@@ -100,6 +111,28 @@ export function useFoxglove(url: string) {
     });
 
     foxgloveClient.on("message", (event) => {
+      const topicName = subscriptionsRef.current.get(event.subscriptionId);
+      if (topicName) {
+        const now = Date.now();
+        const times = frameTimesRef.current.get(topicName) || [];
+        times.push(now);
+        while (times.length > 0 && now - times[0] > 1000) {
+          times.shift();
+        }
+        frameTimesRef.current.set(topicName, times);
+
+        const totalFrames = (frameCountsRef.current.get(topicName) || 0) + 1;
+        frameCountsRef.current.set(topicName, totalFrames);
+
+        setMessageStats((prev) => ({
+          ...prev,
+          [topicName]: {
+            fps: times.length,
+            totalFrames,
+          },
+        }));
+      }
+
       setMessages(prev => {
         // Find topic name using our subscription ID map
         const topicName = subscriptionsRef.current.get(event.subscriptionId);
@@ -124,15 +157,12 @@ export function useFoxglove(url: string) {
           data: decodedData,
           rawData: event.data,
           timestamp: event.timestamp,
+          receivedAt: Date.now(),
         };
-        
-        if (topic.schemaName === 'sensor_msgs/msg/PointCloud2') {
-          return { ...prev, [topicName]: [newMessage] };
-        }
 
         return {
           ...prev,
-          [topicName]: [...existingMessages.slice(-19), newMessage]
+          [topicName]: [...existingMessages.slice(-199), newMessage]
         };
       });
     });
@@ -144,6 +174,8 @@ export function useFoxglove(url: string) {
       ws.close();
       readersRef.current.clear();
       topicsRef.current = [];
+      frameTimesRef.current.clear();
+      frameCountsRef.current.clear();
     };
   }, [url]);
 
@@ -182,5 +214,5 @@ export function useFoxglove(url: string) {
     }
   }, [client, topics]);
 
-  return { client, connected, topics, messages, subscribe, unsubscribe };
+  return { client, connected, topics, messages, messageStats, subscribe, unsubscribe };
 }
