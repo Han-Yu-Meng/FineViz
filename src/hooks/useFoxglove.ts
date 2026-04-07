@@ -27,6 +27,39 @@ export function useFoxglove(url: string) {
   const readersRef = useRef<Map<number, MessageReader>>(new Map());
   const frameTimesRef = useRef<Map<string, number[]>>(new Map());
   const frameCountsRef = useRef<Map<string, number>>(new Map());
+  
+  const messageBufferRef = useRef<Record<string, any[]>>({});
+  const statsBufferRef = useRef<Record<string, FrameStats>>({});
+  const dirtyTopicsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMessages(prev => {
+        if (dirtyTopicsRef.current.size === 0) return prev;
+        
+        const next = { ...prev };
+        for (const topic of dirtyTopicsRef.current) {
+          next[topic] = [...(messageBufferRef.current[topic] || [])];
+        }
+        // 清理脏标记以阻止 React 在安静期间无畏重绘！
+        dirtyTopicsRef.current.clear();
+        return next;
+      });
+
+      setMessageStats(prev => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [topic, stats] of Object.entries(statsBufferRef.current)) {
+          if (prev[topic]?.totalFrames !== stats.totalFrames || prev[topic]?.fps !== stats.fps) {
+            next[topic] = stats;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 100); // 10Hz 的 React 状态同步率
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!url) return;
@@ -124,47 +157,50 @@ export function useFoxglove(url: string) {
         const totalFrames = (frameCountsRef.current.get(topicName) || 0) + 1;
         frameCountsRef.current.set(topicName, totalFrames);
 
-        setMessageStats((prev) => ({
-          ...prev,
-          [topicName]: {
-            fps: times.length,
-            totalFrames,
-          },
-        }));
+        statsBufferRef.current[topicName] = {
+          fps: times.length,
+          totalFrames,
+        };
       }
 
-      setMessages(prev => {
-        // Find topic name using our subscription ID map
-        const topicName = subscriptionsRef.current.get(event.subscriptionId);
-        if (!topicName) return prev;
+      // Find topic name using our subscription ID map
+      if (!topicName) return;
 
-        const topic = topicsRef.current.find(t => t.name === topicName);
-        if (!topic) return prev;
-        
-        const existingMessages = prev[topicName] || [];
-        const reader = readersRef.current.get(topic.id);
-        let decodedData: unknown = event.data;
+      const topic = topicsRef.current.find(t => t.name === topicName);
+      if (!topic) return;
+      
+      const existingMessages = messageBufferRef.current[topicName] || [];
+      const reader = readersRef.current.get(topic.id);
+      let decodedData: unknown = event.data;
 
-        if (reader) {
-          try {
-            decodedData = reader.readMessage(event.data);
-          } catch (err) {
-            console.warn(`消息反序列化失败: ${topic.name}`, err);
-          }
+      if (reader) {
+        try {
+          decodedData = reader.readMessage(event.data);
+        } catch (err) {
+          console.warn(`消息反序列化失败: ${topic.name}`, err);
         }
+      }
 
-        const newMessage = {
-          data: decodedData,
-          rawData: event.data,
-          timestamp: event.timestamp,
-          receivedAt: Date.now(),
-        };
+      const newMessage = {
+        data: decodedData,
+        rawData: event.data,
+        timestamp: event.timestamp,
+        receivedAt: Date.now(),
+      };
 
-        return {
-          ...prev,
-          [topicName]: [...existingMessages.slice(-199), newMessage]
-        };
-      });
+      // JS 原生数组 push 远比 [...arr] 原地重新构建立即拷贝快几个数量级，缓解 GC 压力
+      if (!messageBufferRef.current[topicName]) {
+        messageBufferRef.current[topicName] = [];
+      }
+      const buffer = messageBufferRef.current[topicName];
+      buffer.push(newMessage);
+      // 保持历史限制
+      while (buffer.length > 200) {
+        buffer.shift();
+      }
+
+      // 给这个话题打上“脏标志”，让稍后的 10Hz Interval 把它合并同步进 UI 引擎
+      dirtyTopicsRef.current.add(topicName);
     });
 
     setClient(foxgloveClient);

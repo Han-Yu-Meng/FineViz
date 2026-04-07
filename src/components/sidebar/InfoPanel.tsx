@@ -10,10 +10,6 @@ export function InfoPanel({ config }: { config: AppConfig | null }) {
         <div>{config.info.name}</div>
       </div>
       <div>
-        <div className="text-slate-500 mb-1">Fixed Frame</div>
-        <div className="font-mono text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-200">{config.tf?.fixed_frame || 'map'}</div>
-      </div>
-      <div>
         <div className="text-slate-500 mb-1">WebSocket Server</div>
         <div className="font-mono text-xs bg-slate-50 p-2 rounded border border-slate-200">{config.info.server}</div>
       </div>

@@ -1,7 +1,7 @@
 info:
   name: "智能轮椅可视化"
-  server: ws://172.23.68.219:8765
-  api_server: http://172.23.68.219:3000
+  server: ws://192.168.1.100:8765
+  api_server: http://192.168.1.100:3000
 
 visualize:
   cloud_registered:
@@ -58,6 +58,11 @@ chart:
     - topic: "/cmd_vel"
       fields: ["linear.x", "angular.z"]
       colors: ["#E35D97", "#5DCEE3"]
+
+  chart2:
+    - topic: "/Odometry"
+      fields: ["linear.x", "angular.z"]
+      colors: ["#E35D97", "#5DE35D"]
       
 tf: 
   fixed_frame: "map"

@@ -1,14 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { AppConfig } from '../../hooks/useConfig';
-import { Network, ChevronRight, ChevronDown, Eye, EyeOff } from 'lucide-react';
+import { FrameStats } from '../../hooks/useFoxglove';
+import { Network, ChevronRight, ChevronDown, Eye, EyeOff, Activity } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface TransformsPanelProps {
   config: AppConfig | null;
   messages: Record<string, any[]>;
+  messageStats: Record<string, FrameStats>;
 }
 
-export function TransformsPanel({ config, messages }: TransformsPanelProps) {
+export function TransformsPanel({ config, messages, messageStats }: TransformsPanelProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const fixedFrame = config?.tf?.fixed_frame || 'map';
   const hiddenFrames = useMemo(() => new Set(config?.tf?.hidden_frame || []), [config]);
@@ -77,8 +79,30 @@ export function TransformsPanel({ config, messages }: TransformsPanelProps) {
     );
   };
 
+  const renderTfStreamCard = (topicName: string, type: string) => {
+    const stats = messageStats[topicName] || { fps: 0, totalFrames: 0 };
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 text-sm rounded bg-slate-50 border border-slate-100 mb-2">
+        <Activity size={14} className={stats.fps > 0 ? "text-blue-500 animate-pulse" : "text-slate-400"} />
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="font-mono text-xs truncate">{topicName}</span>
+          <span className="text-[10px] font-mono text-slate-500">{type}</span>
+          <span className="text-[10px] font-mono text-blue-600/80">
+            {stats.fps.toFixed(1)} FPS | {stats.totalFrames} frames
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="py-2">
+    <div className="py-2 px-2">
+      <div className="mb-4">
+        <div className="text-xs font-semibold text-slate-500 uppercase px-1 mb-2">TF Streams</div>
+        {renderTfStreamCard('/tf', 'tf2_msgs/msg/TFMessage')}
+        {renderTfStreamCard('/tf_static', 'tf2_msgs/msg/TFMessage')}
+      </div>
+      <div className="text-xs font-semibold text-slate-500 uppercase px-1 mb-2">TF Tree</div>
       <div className="px-1">
         {renderNode(transforms)}
       </div>

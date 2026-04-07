@@ -135,13 +135,19 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         // DEBUG: Collect all child frame IDs we see in this decode loop
         const seenFrames = new Set<string>();
 
-        rawTf.forEach(msg => {
+        // 性能关键倒序遍历: 在 TF 流达到百赫兹以上时，同一渲染周期内获取几百次历史毫无意义。
+        // 反向遍历优先应用最新时间戳帧的坐标，屏蔽冗余旧历史数据！
+        for (let i = rawTf.length - 1; i >= 0; i--) {
+          const msg = rawTf[i];
           const transforms = msg.data?.transforms || msg.transforms || [];
-          transforms.forEach((t: any) => {
+          for (let j = transforms.length - 1; j >= 0; j--) {
+            const t = transforms[j];
             const childFrameId = t.child_frame_id.startsWith('/') ? t.child_frame_id.substring(1) : t.child_frame_id;
             const parentFrameId = t.header.frame_id.startsWith('/') ? t.header.frame_id.substring(1) : t.header.frame_id;
             
-            seenFrames.add(`${parentFrameId}->${childFrameId}`);
+            // 一但发现了最新帧的 TF 连接，立刻忽略后续历史帧避免运算灾难
+            if (seenFrames.has(childFrameId)) continue;
+            seenFrames.add(childFrameId);
             
             const existing = next[childFrameId];
 
@@ -164,8 +170,8 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
               };
               changed = true;
             }
-          });
-        });
+          }
+        }
 
         // Apply configured fixed transforms (helpful for missing /tf_static from bag playback)
         if (cfg.tf?.fixed_transform) {
@@ -409,7 +415,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
       <DeckGL
-        _maxFPS={60}
+        _maxFPS={30}
         views={new OrbitView({ id: 'orbit' })}
         controller={{
           dragMode: 'pan',

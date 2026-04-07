@@ -1,45 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { AppConfig } from '../hooks/useConfig';
 
 interface RealtimeChartProps {
   topic: string;
   fields: string[];
   colors: string[];
+  messages: any[];
 }
 
-export function RealtimeChart({ topic, fields, colors }: RealtimeChartProps) {
-  const [data, setData] = useState<any[]>([]);
+function getNestedValue(obj: any, path: string): number {
+  return path.split('.').reduce((o, key) => (o && o[key] !== 'undefined' ? o[key] : 0), obj) || 0;
+}
 
-  useEffect(() => {
-    // Generate some mock data for the chart since we don't have a real backend
-    const interval = setInterval(() => {
-      setData(prev => {
-        const newData = [...prev];
-        if (newData.length > 50) newData.shift();
-        
-        const point: any = { time: new Date().toLocaleTimeString() };
-        fields.forEach((field, i) => {
-          // Generate a random walk
-          const lastVal = prev.length > 0 ? prev[prev.length - 1][field] : 0;
-          point[field] = lastVal + (Math.random() - 0.5) * 2;
-        });
-        
-        newData.push(point);
-        return newData;
+export function RealtimeChart({ topic, fields, colors, messages }: RealtimeChartProps) {
+  const chartData = useMemo(() => {
+    // Process the last 50 messages to render in the chart
+    const recentMessages = messages.slice(-50);
+    return recentMessages.map((msg, index) => {
+      const point: any = { time: msg.receivedAt || index };
+      fields.forEach((field) => {
+        point[field] = getNestedValue(msg.data, field);
       });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [fields]);
+      return point;
+    });
+  }, [messages, fields]);
 
   return (
     <div className="h-48 w-full mt-2">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+        <LineChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
           <XAxis dataKey="time" hide />
-          <YAxis stroke="#666" tick={{ fill: '#666', fontSize: 10 }} />
+          <YAxis stroke="#94a3b8" tick={{ fill: '#64748b', fontSize: 10 }} width={45} />
           {fields.map((field, idx) => (
             <Line 
               key={field}

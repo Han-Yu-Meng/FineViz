@@ -30,11 +30,12 @@ export function StreamsPanel({
   onToggleTopicVisibility,
 }: StreamsPanelProps) {
   const layoutTopics = collectLayoutTopics(config);
+  const streamTopics = layoutTopics.filter(t => !t.type.includes('/srv/') && t.name !== '/tf' && t.name !== '/tf_static');
   const availableTopicSet = new Set(topics.map((t) => t.name));
 
   return (
     <div className="py-2">
-      {layoutTopics.map((topicInfo) => {
+      {streamTopics.map((topicInfo) => {
         const topic = topicInfo.name;
         const hasMessages = (messages[topic] || []).length > 0;
         const isAvailable = availableTopicSet.has(topic);
@@ -87,8 +88,8 @@ export function StreamsPanel({
           </div>
         );
       })}
-      {layoutTopics.length === 0 && (
-        <div className="text-slate-500 text-sm text-center py-8">No topics available</div>
+      {streamTopics.length === 0 && (
+        <div className="text-slate-500 text-sm text-center py-8">No streams available</div>
       )}
     </div>
   );

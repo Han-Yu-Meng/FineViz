@@ -2,7 +2,12 @@ import React from 'react';
 import { AppConfig } from '../../hooks/useConfig';
 import { RealtimeChart } from '../RealtimeChart';
 
-export function ChartsPanel({ config }: { config: AppConfig | null }) {
+interface ChartsPanelProps {
+  config: AppConfig | null;
+  messages: Record<string, any[]>;
+}
+
+export function ChartsPanel({ config, messages }: ChartsPanelProps) {
   if (!config?.chart) return <div className="text-slate-500 text-sm text-center py-8">No charts configured</div>;
   
   return (
@@ -22,7 +27,12 @@ export function ChartsPanel({ config }: { config: AppConfig | null }) {
                   ))}
                 </div>
               </div>
-              <RealtimeChart topic={chart.topic} fields={chart.fields} colors={chart.colors} />
+              <RealtimeChart 
+                topic={chart.topic} 
+                fields={chart.fields} 
+                colors={chart.colors} 
+                messages={messages[chart.topic] || []} 
+              />
             </div>
           ))}
         </div>

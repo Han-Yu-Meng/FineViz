@@ -58,8 +58,8 @@ export function Sidebar({
             onToggleTopicVisibility={onToggleTopicVisibility}
           />
         )}
-        {activeTab === 'transforms' && <TransformsPanel config={config} messages={messages} />}
-        {activeTab === 'charts' && <ChartsPanel config={config} />}
+        {activeTab === 'transforms' && <TransformsPanel config={config} messages={messages} messageStats={messageStats} />}
+        {activeTab === 'charts' && <ChartsPanel config={config} messages={messages} />}
       </div>
     </div>
   );
