@@ -204,11 +204,11 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   }, []);
 
   // Debug: Print current TF tree nodes
-  useEffect(() => {
-    if (Object.keys(tfTree).length > 0) {
-      console.log("[TF Tree Status] Frames in tree:", Object.keys(tfTree));
-    }
-  }, [tfTree]);
+  // useEffect(() => {
+  //   if (Object.keys(tfTree).length > 0) {
+  //     console.log("[TF Tree Status] Frames in tree:", Object.keys(tfTree));
+  //   }
+  // }, [tfTree]);
 
   const tfLayers = useMemo(() => {
     const links = Object.values(tfTree);
@@ -296,8 +296,8 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       if (t.includes('registered') || d.frameId !== fixedFrame) {
 
         const trans = mat4.getTranslation();
-        console.log(`[PointCloud Debug] topic: ${t}, frame_id: ${d.frameId}, fixed_frame: ${fixedFrame}`);
-        console.log(`[PointCloud Debug] World Matrix Translation: [${trans[0].toFixed(3)}, ${trans[1].toFixed(3)}, ${trans[2].toFixed(3)}]`);
+        // console.log(`[PointCloud Debug] topic: ${t}, frame_id: ${d.frameId}, fixed_frame: ${fixedFrame}`);
+        // console.log(`[PointCloud Debug] World Matrix Translation: [${trans[0].toFixed(3)}, ${trans[1].toFixed(3)}, ${trans[2].toFixed(3)}]`);
       }
 
       return new PointCloudLayer({
@@ -409,12 +409,13 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
       <DeckGL
+        _maxFPS={60}
         views={new OrbitView({ id: 'orbit' })}
         controller={{
           dragMode: 'pan',
           dragPan: true,
           dragRotate: true,
-          inertia: 100,
+          inertia: false, 
           scrollZoom: { speed: 0.02, smooth: false },
           touchRotate: true
         }}
