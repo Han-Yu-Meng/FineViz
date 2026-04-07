@@ -1,0 +1,9 @@
+waypoints:
+  - id: 1
+    name: "起点"
+    position: { x: 0.0, y: 0.0, z: 0.0 }
+    orientation: { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+  - id: 2
+    name: "目标点 A"
+    position: { x: 5.0, y: 2.0, z: 0.0 }
+    orientation: { x: 0.0, y: 0.0, z: 0.707, w: 0.707 }

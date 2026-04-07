@@ -1,0 +1,61 @@
+info:
+  name: "智能轮椅可视化"
+  server: ws://172.23.68.219:8765
+  api_server: http://172.23.68.219:3000
+
+visualize:
+  cloud_registered:
+    topic: "/cloud_registered"
+    type: "sensor_msgs/msg/PointCloud2"
+    listen_updates: true
+    last_time: 5
+    color_field: "intensity"
+    color_scheme: "turbo"
+    
+  global_map:
+    topic: "/global_map"
+    type: "sensor_msgs/msg/PointCloud2"
+    listen_updates: false
+    last_time: 0
+    color_field: "z"
+    color_scheme: "turbo"
+  
+  plan:
+    topic: "/plan"
+    type: "nav_msgs/msg/Path"
+    listen_updates: true
+    width: 5
+    color: "#5D99E3"
+    alpha: 0.7
+  
+  trajectories:
+    topic: "/trajectories"
+    type: "visualization_msgs/msg/MarkerArray"
+ 
+service:
+  startup:
+    topic: "/wheelchair/startup"
+    type: "std_srvs/srv/Trigger"
+    icon: "Power"
+    
+  shutdown:
+    topic: "/wheelchair/shutdown"
+    type: "std_srvs/srv/Trigger"
+    icon: "PowerOff" 
+   
+  set_speed:
+    topic: "/wheelchair/set_speed"
+    type: "wheelchair_msgs/srv/SetSpeed"
+    icon: "Gauge"
+    
+chart:
+  chart1:
+    - topic: "/cmd_vel"
+      fields: ["linear.x", "angular.z"]
+      colors: ["#E35D97", "#5DCEE3"]
+      
+tf: 
+  fixed_frame: "map"
+  hidden_frame:
+    - "livox_frame_192_168_1_196" 
+    - "livox_frame_192_168_1_187"
