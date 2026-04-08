@@ -1,0 +1,67 @@
+info:
+  server: ws://192.168.9.7:8765
+  api_server: http://192.168.9.7:3000
+
+visualize:
+  cloud_registered:
+    topic: "/cloud_registered"
+    type: "sensor_msgs/msg/PointCloud2"
+    listen_updates: true
+    last_time: 40
+    point_size: 1
+    color_field: "intensity"
+    color_scheme: "turbo"
+    alpha: 0.8
+    
+  global_map:
+    topic: "/global_map"
+    type: "sensor_msgs/msg/PointCloud2"
+    listen_updates: false
+    last_time: 0
+    point_size: 1.5
+    color_field: "z"
+    color_scheme: "warm"
+    alpha: 0.8
+  
+  plan:
+    topic: "/plan"
+    type: "nav_msgs/msg/Path"
+    listen_updates: true
+    width: 0.2
+    color: "#5D99E3"
+    alpha: 0.9
+  
+  trajectories:
+    topic: "/trajectories"
+    type: "visualization_msgs/msg/MarkerArray"
+    alpha: 0.8
+ 
+service:
+  Startup:
+    topic: "/wheelchair/startup"
+    type: "std_srvs/srv/Trigger"
+    icon: "Power"
+    
+  Shutdown:
+    topic: "/wheelchair/shutdown"
+    type: "std_srvs/srv/Trigger"
+    icon: "PowerOff" 
+   
+  SetSpeed:
+    topic: "/wheelchair/set_speed"
+    type: "wheelchair_msgs/srv/SetSpeed"
+    icon: "Gauge"
+    
+chart:
+  chart1:
+    - topic: "/cmd_vel"
+      fields: ["linear.x", "angular.z"]
+      colors: ["#E35D97", "#5DCEE3"]
+
+  chart2:
+    - topic: "/Odometry"
+      fields: ["linear.x", "angular.z"]
+      colors: ["#E35D97", "#5DE35D"]
+      
+tf: 
+  fixed_frame: "map"
