@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import DeckGL from '@deck.gl/react';
 import { OrbitView } from '@deck.gl/core';
-import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer, BitmapLayer } from '@deck.gl/layers';
 import { AppConfig, Waypoint } from '../hooks/useConfig';
 import { Matrix4, Quaternion } from '@math.gl/core';
 
@@ -10,6 +10,7 @@ import { PointCloudBinary, TFLink } from './render/types';
 import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
 import { getFrameMatrix } from './render/tfTreeResolver';
+import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
 
 interface DeckGLViewProps {
   config: AppConfig | null;
@@ -25,6 +26,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
   const [pathData, setPathData] = useState<Record<string, any>>({});
   const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
+  const [gridData, setGridData] = useState<Record<string, OccupancyGridData>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -144,6 +146,20 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       nextMarkers[c.topic] = md;
     }
     setMarkerData(nextMarkers);
+
+    // --- Update Occupancy Grids ---
+    const gridConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'nav_msgs/msg/OccupancyGrid' && item?.topic);
+    const nextGrids: Record<string, OccupancyGridData> = {};
+    for (const c of gridConfigs as any[]) {
+      if (!(vis[c.topic] ?? true)) continue;
+      const m = msgs[c.topic] || [];
+      if (m.length === 0) continue;
+      const latestMsg = m[m.length - 1];
+      
+      const res = decodeOccupancyGrid(latestMsg.data);
+      if (res) nextGrids[c.topic] = res;
+    }
+    setGridData(nextGrids);
 
     // --- Update TF Tree ---
     const rawTf = [...(msgs['/tf'] || []), ...(msgs['/tf_static'] || [])];
@@ -316,131 +332,107 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     ];
   }, [tfTree, fixedFrame, config?.tf]);
 
-  const layers = useMemo(() => [
-    new LineLayer({
-      id: 'grid',
-      data: (() => { const l = []; for (let i = -20; i <= 20; i += 2) { l.push({ s: [i, -20, 0], t: [i, 20, 0] }, { s: [-20, i, 0], t: [20, i, 0] }); } return l; })(),
-      getSourcePosition: (d: any) => d.s,
-      getTargetPosition: (d: any) => d.t,
-      getColor: [80, 80, 80, 100]
-    }),
-    ...Object.entries(pointCloudData).map(([t, d]) => {
-      const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
-      const modelMatrix = mat4.toArray();
+  const layers = useMemo(() => {
+    const allGridLayers = Object.entries(gridData).map(([t, d]) => {
+      if (!d || d.width <= 0 || d.height <= 0) return null;
       
-      // Debug log for transformation troubleshooting
-      if (t.includes('registered') || d.frameId !== fixedFrame) {
+      const vConfigs = config?.visualize || {};
+      const topicConfig = Object.entries(vConfigs).find(([_, c]: [string, any]) => c.topic === t)?.[1] as any;
+      const alpha = topicConfig?.alpha ?? 1.0;
 
-        const trans = mat4.getTranslation();
-        // console.log(`[PointCloud Debug] topic: ${t}, frame_id: ${d.frameId}, fixed_frame: ${fixedFrame}`);
-        // console.log(`[PointCloud Debug] World Matrix Translation: [${trans[0].toFixed(3)}, ${trans[1].toFixed(3)}, ${trans[2].toFixed(3)}]`);
-      }
-
-      return new PointCloudLayer({
-        id: `${t}-${d.frameId}`, // Include frameId in ID to force layer recreation if frame changes
-        data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
-        sizeUnits: 'pixels',
-        pointSize: d.pointSize ?? 1.5,
-        opacity: d.alpha ?? 1.0,
-        modelMatrix: modelMatrix,
-        updateTriggers: {
-          modelMatrix: [modelMatrix]
-        }
-      });
-    }),
-    ...Object.entries(pathData).map(([t, d]) => {
       const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
-      const modelMatrix = mat4.toArray();
-
-      return new PathLayer({
-
-        id: `path-${t}-${d.frameId}`,
-        data: [{ path: d.path, color: d.color, width: d.width }],
-        pickable: false,
-        widthScale: 1,
-        widthMinPixels: 2,
-        getPath: (p: any) => p.path,
-        getColor: (p: any) => p.color,
-        getWidth: (p: any) => p.width,
-        modelMatrix: modelMatrix,
-        updateTriggers: {
-          modelMatrix: [modelMatrix]
+      const originMat = new Matrix4().translate(d.origin.position).multiplyRight(new Matrix4().fromQuaternion(d.origin.orientation));
+      const finalMat = mat4.clone().multiplyRight(originMat).translate([0, 0, 0]);
+      
+      return new BitmapLayer({
+        id: `grid-${t}-${d.frameId}-${d.width}-${d.height}`,
+        image: d.canvas,
+        bounds: [0, 0, d.width * d.resolution, d.height * d.resolution],
+        modelMatrix: finalMat.toArray(),
+        opacity: alpha,
+        transparentColor: [0, 0, 0, 0], // 启用透明混合
+        textureParameters: { 
+          minFilter: 'nearest', 
+          magFilter: 'nearest', 
+          mipmaps: false, 
+          wrapS: 'clamp-to-edge', 
+          wrapT: 'clamp-to-edge' 
+        },
+        updateTriggers: { 
+          image: [d.canvas],
+          opacity: [alpha] 
         }
       });
-    }),
-    ...Object.entries(markerData).flatMap(([t, frames]) => {
-      return Object.entries(frames).flatMap(([frameId, markers]) => {
-        const mat4 = getFrameMatrix(frameId, tfTree, fixedFrame);
-        const modelMatrix = mat4.toArray();
+    }).filter(Boolean);
 
-        const layers: any[] = [];
-        
-        // 2: SPHERE or 8: POINTS. SPHERE gives local pose center, points use array
-        const spheres = markers.filter(m => m.type === 2);
-        if (spheres.length > 0) {
-          layers.push(new ScatterplotLayer({
-            id: `marker-sphere-${t}-${frameId}`,
-            data: spheres,
-            getPosition: (d: MarkerPrimitive) => d.position,
-            getFillColor: (d: MarkerPrimitive) => d.color,
-            getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, // assume uniform scale or X as radius
-            radiusUnits: 'meters',
-            modelMatrix: modelMatrix,
-            updateTriggers: { modelMatrix: [modelMatrix] }
+    const behindTopics = new Set(
+      Object.entries(config?.visualize || {})
+        .filter(([_, c]: [string, any]) => c.draw_behind === true)
+        .map(([_, c]: [string, any]) => c.topic)
+    );
+
+    const behindGrids = allGridLayers.filter(l => behindTopics.has((l?.id as string).split('-')[1]));
+    const normalGrids = allGridLayers.filter(l => !behindTopics.has((l?.id as string).split('-')[1]));
+
+    const dataLayers = [
+      ...Object.entries(pointCloudData).map(([t, d]) => {
+        const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
+        return new PointCloudLayer({
+          id: `${t}-${d.frameId}`,
+          data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
+          sizeUnits: 'pixels', pointSize: d.pointSize ?? 1.5, opacity: d.alpha ?? 1.0, modelMatrix: mat4.toArray(),
+          updateTriggers: { modelMatrix: [mat4.toArray()] }
+        });
+      }),
+      ...Object.entries(pathData).map(([t, d]) => {
+        const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
+        return new PathLayer({
+          id: `path-${t}-${d.frameId}`,
+          data: [{ path: d.path, color: d.color, width: d.width }],
+          pickable: false, widthScale: 1, widthMinPixels: 2, getPath: (p: any) => p.path, getColor: (p: any) => p.color, getWidth: (p: any) => p.width,
+          modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
+        });
+      }),
+      ...Object.entries(markerData).flatMap(([t, frames]) => {
+        return Object.entries(frames).flatMap(([frameId, markers]) => {
+          const mat4 = getFrameMatrix(frameId, tfTree, fixedFrame);
+          const subLayers: any[] = [];
+          const spheres = markers.filter(m => m.type === 2);
+          if (spheres.length > 0) subLayers.push(new ScatterplotLayer({
+            id: `marker-sphere-${t}-${frameId}`, data: spheres, getPosition: (d: MarkerPrimitive) => d.position, getFillColor: (d: MarkerPrimitive) => d.color, getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, radiusUnits: 'meters', modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
           }));
-        }
-
-        // 4: LINE_STRIP. Use PathLayer. Points are provided in array.
-        const lineStrips = markers.filter(m => m.type === 4);
-        if (lineStrips.length > 0) {
-          layers.push(new PathLayer({
-            id: `marker-linestrip-${t}-${frameId}`,
-            data: lineStrips,
-            getPath: (d: MarkerPrimitive) => d.points,
-            getColor: (d: MarkerPrimitive) => d.color,
-            getWidth: (d: MarkerPrimitive) => d.scale[0],
-            widthUnits: 'meters',
-            modelMatrix: modelMatrix,
-            updateTriggers: { modelMatrix: [modelMatrix] }
+          const lineStrips = markers.filter(m => m.type === 4);
+          if (lineStrips.length > 0) subLayers.push(new PathLayer({
+            id: `marker-linestrip-${t}-${frameId}`, data: lineStrips, getPath: (d: MarkerPrimitive) => d.points, getColor: (d: MarkerPrimitive) => d.color, getWidth: (d: MarkerPrimitive) => d.scale[0], widthUnits: 'meters', modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
           }));
-        }
+          const lineLists = markers.filter(m => m.type === 5);
+          if (lineLists.length > 0) {
+            const linesData = lineLists.flatMap(m => {
+              const pairs = [];
+              for (let i = 0; i < m.points.length; i += 2) if (i + 1 < m.points.length) pairs.push({ source: m.points[i], target: m.points[i + 1], color: m.color, width: m.scale[0] });
+              return pairs;
+            });
+            subLayers.push(new LineLayer({
+              id: `marker-linelist-${t}-${frameId}`, data: linesData, getSourcePosition: (d: any) => d.source, getTargetPosition: (d: any) => d.target, getColor: (d: any) => d.color, getWidth: (d: any) => d.width, widthUnits: 'meters', modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
+            }));
+          }
+          return subLayers;
+        });
+      })
+    ];
 
-        // 5: LINE_LIST. Use LineLayer
-        const lineLists = markers.filter(m => m.type === 5);
-        if (lineLists.length > 0) {
-          const linesData = lineLists.flatMap(m => {
-            const pairs = [];
-            for (let i = 0; i < m.points.length; i += 2) {
-              if (i + 1 < m.points.length) {
-                pairs.push({
-                  source: m.points[i],
-                  target: m.points[i + 1],
-                  color: m.color,
-                  width: m.scale[0]
-                });
-              }
-            }
-            return pairs;
-          });
-
-          layers.push(new LineLayer({
-            id: `marker-linelist-${t}-${frameId}`,
-            data: linesData,
-            getSourcePosition: (d: any) => d.source,
-            getTargetPosition: (d: any) => d.target,
-            getColor: (d: any) => d.color,
-            getWidth: (d: any) => d.width,
-            widthUnits: 'meters',
-            modelMatrix: modelMatrix,
-            updateTriggers: { modelMatrix: [modelMatrix] }
-          }));
-        }
-
-        return layers;
-      });
-    }),
-    ...tfLayers
-  ], [pointCloudData, pathData, markerData, tfLayers, tfTree, fixedFrame]);
+    return [
+      new LineLayer({
+        id: 'grid-bg',
+        data: (() => { const l = []; for (let i = -20; i <= 20; i += 2) l.push({ s: [i, -20, 0], t: [i, 20, 0] }, { s: [-20, i, 0], t: [20, i, 0] }); return l; })(),
+        getSourcePosition: (d: any) => d.s, getTargetPosition: (d: any) => d.t, getColor: [80, 80, 80, 100]
+      }),
+      ...behindGrids,
+      ...dataLayers,
+      ...normalGrids,
+      ...tfLayers
+    ];
+  }, [pointCloudData, pathData, markerData, gridData, tfLayers, tfTree, fixedFrame, config?.visualize]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
