@@ -65,3 +65,7 @@ chart:
       
 tf: 
   fixed_frame: "map"
+
+  axis_length: 0.2
+  axis_width: 0.05
+  axis_label_visualize: true

@@ -242,14 +242,19 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     const axisData: any[] = [];
     const labelData: any[] = [];
 
+    const axisLength = config?.tf?.axis_length ?? 0.5;
+    const axisWidth = config?.tf?.axis_width ?? 0.05;
+    const labelVisualize = config?.tf?.axis_label_visualize ?? true;
+
     // Root Axis
-    const s = 0.5;
     axisData.push(
-      { s: [0, 0, 0], t: [s, 0, 0], color: [255, 0, 0] },
-      { s: [0, 0, 0], t: [0, s, 0], color: [0, 255, 0] },
-      { s: [0, 0, 0], t: [0, 0, s], color: [0, 0, 255] }
+      { s: [0, 0, 0], t: [axisLength, 0, 0], color: [255, 0, 0] },
+      { s: [0, 0, 0], t: [0, axisLength, 0], color: [0, 255, 0] },
+      { s: [0, 0, 0], t: [0, 0, axisLength], color: [0, 0, 255] }
     );
-    labelData.push({ text: fixedFrame, position: [0, 0, 0] });
+    if (labelVisualize) {
+      labelData.push({ text: fixedFrame, position: [0, 0, 0] });
+    }
 
     links.forEach(link => {
       const worldMat = getFrameMatrix(link.child, tfTree, fixedFrame);
@@ -265,16 +270,18 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       worldMat.getRotation(q);
       const rotationMat = new Matrix4().fromQuaternion(q);
       
-      const xAxis = rotationMat.transformVector([s, 0, 0]);
-      const yAxis = rotationMat.transformVector([0, s, 0]);
-      const zAxis = rotationMat.transformVector([0, 0, s]);
+      const xAxis = rotationMat.transformVector([axisLength, 0, 0]);
+      const yAxis = rotationMat.transformVector([0, axisLength, 0]);
+      const zAxis = rotationMat.transformVector([0, 0, axisLength]);
 
       axisData.push(
         { s: pos, t: [pos[0] + xAxis[0], pos[1] + xAxis[1], pos[2] + xAxis[2]], color: [255, 0, 0] },
         { s: pos, t: [pos[0] - yAxis[0], pos[1] - yAxis[1], pos[2] - yAxis[2]], color: [0, 255, 0] },
         { s: pos, t: [pos[0] - zAxis[0], pos[1] - zAxis[1], pos[2] - zAxis[2]], color: [0, 0, 255] }
       );
-      labelData.push({ text: link.child, position: pos });
+      if (labelVisualize) {
+        labelData.push({ text: link.child, position: pos });
+      }
     });
 
     return [
@@ -292,7 +299,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         getSourcePosition: d => d.s,
         getTargetPosition: d => d.t,
         getColor: d => d.color,
-        getWidth: 3
+        getWidth: axisWidth * 100 // Scale width for visibility
       }),
       new TextLayer({
         id: 'tf-labels',
@@ -301,10 +308,13 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         getText: d => d.text,
         getSize: 12,
         getColor: [50, 50, 50],
-        getPixelOffset: [5, 5]
+        getPixelOffset: [5, 5],
+        background: true,
+        getBackgroundColor: [255, 255, 255, 180],
+        backgroundPadding: [4, 2]
       })
     ];
-  }, [tfTree, fixedFrame]);
+  }, [tfTree, fixedFrame, config?.tf]);
 
   const layers = useMemo(() => [
     new LineLayer({
