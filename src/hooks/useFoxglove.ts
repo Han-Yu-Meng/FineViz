@@ -21,6 +21,7 @@ export function useFoxglove(url: string) {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [messages, setMessages] = useState<Record<string, any[]>>({});
   const [messageStats, setMessageStats] = useState<Record<string, FrameStats>>({});
+  const [retryCount, setRetryCount] = useState(0);
   
   const wsRef = useRef<WebSocket | null>(null);
   const topicsRef = useRef<Topic[]>([]);
@@ -89,14 +90,32 @@ export function useFoxglove(url: string) {
     foxgloveClient.on("open", () => {
       console.log("Foxglove 连接成功！");
       setConnected(true);
+      
+      // 检测是否为重连状态（通过 sessionStorage 跨刷新持久化标记）
+      const wasDisconnected = sessionStorage.getItem('foxglove-reconnect-needed') === 'true';
+      if (wasDisconnected || retryCount > 0) {
+        console.log("检测到断线重连成功，正在刷新页面以重置 TF 树...");
+        sessionStorage.removeItem('foxglove-reconnect-needed');
+        window.location.reload();
+        return;
+      }
+      
+      setRetryCount(0); // 重置重试计数
     });
 
     foxgloveClient.on("close", () => {
       setConnected(false);
+      sessionStorage.setItem('foxglove-reconnect-needed', 'true'); // 记录掉线标记
       setTopics([]);
       setMessageStats({});
       frameTimesRef.current.clear();
       frameCountsRef.current.clear();
+
+      // 自动尝试重连
+      console.log("Foxglove 连接关闭，500ms后尝试重连...");
+      setTimeout(() => {
+        setRetryCount(prev => prev + 1);
+      }, 500);
     });
 
     foxgloveClient.on("advertise", (newTopics) => {
@@ -218,7 +237,7 @@ export function useFoxglove(url: string) {
       frameTimesRef.current.clear();
       frameCountsRef.current.clear();
     };
-  }, [url]);
+  }, [url, retryCount]);
 
   const subscriptionsRef = useRef<Map<number, string>>(new Map());
   const topicToSubscriptionRef = useRef<Map<string, number>>(new Map());

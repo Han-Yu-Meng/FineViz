@@ -12,8 +12,15 @@ import { DeckGLView } from './components/DeckGLView';
 import { collectLayoutTopics } from './lib/layoutTopics';
 
 export default function App() {
-  const [layoutPath, setLayoutPath] = useState<string>('layout/wheelchair.yaml');
+  const [layoutPath, setLayoutPath] = useState<string>(() => {
+    return localStorage.getItem('fineviz-layout-path') || 'layout/wheelchair.yaml';
+  });
   const { config, waypoints, manifest, loading } = useConfig(layoutPath);
+
+  useEffect(() => {
+    localStorage.setItem('fineviz-layout-path', layoutPath);
+  }, [layoutPath]);
+
   const { connected, topics, subscribe, messages, messageStats } = useFoxglove(config?.info?.server || '');
   const layoutTopics = useMemo(() => collectLayoutTopics(config), [config]);
   const layoutTopicNames = useMemo(() => layoutTopics.map((t) => t.name), [layoutTopics]);

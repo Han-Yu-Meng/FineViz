@@ -37,7 +37,7 @@ export function Sidebar({
   onLayoutPathChange,
   manifest
 }: SidebarProps) {
-  const [internalTab, setInternalTab] = useState<string>('streams');
+  const [internalTab, setInternalTab] = useState<string>('info');
   
   const activeTab = externalTab !== undefined ? externalTab : internalTab;
   const setActiveTab = (tab: string) => {
