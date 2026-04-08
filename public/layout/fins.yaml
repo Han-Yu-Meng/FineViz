@@ -35,6 +35,11 @@ visualize:
     topic: "/trajectories"
     type: "visualization_msgs/msg/MarkerArray"
     alpha: 0.8
+  
+  # ocotomap:
+  #   topic: "/occupied_cells_vis_array"
+  #   type: "visualization_msgs/msg/MarkerArray"
+  #   alpha: 1.0
  
 service:
   Startup:
