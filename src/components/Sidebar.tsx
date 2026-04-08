@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Info, Activity, ListTree, LineChart } from 'lucide-react';
-import { AppConfig } from '../hooks/useConfig';
+import { AppConfig, ConfigManifest } from '../hooks/useConfig';
 import { FrameStats, Topic } from '../hooks/useFoxglove';
 import { cn } from '../lib/utils';
 import { InfoPanel } from './sidebar/InfoPanel';
@@ -18,6 +18,9 @@ interface SidebarProps {
   messageStats: Record<string, FrameStats>;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
+  layoutPath: string;
+  onLayoutPathChange: (path: string) => void;
+  manifest: ConfigManifest[];
 }
 
 export function Sidebar({ 
@@ -29,7 +32,10 @@ export function Sidebar({
   messages, 
   messageStats,
   activeTab: externalTab,
-  onTabChange
+  onTabChange,
+  layoutPath,
+  onLayoutPathChange,
+  manifest
 }: SidebarProps) {
   const [internalTab, setInternalTab] = useState<string>('streams');
   
@@ -57,7 +63,15 @@ export function Sidebar({
       </div>
       
       <div className="flex-1 overflow-y-auto p-2">
-        {activeTab === 'info' && <InfoPanel config={config} connected={connected} />}
+        {activeTab === 'info' && (
+          <InfoPanel 
+            config={config} 
+            connected={connected} 
+            layoutPath={layoutPath} 
+            onLayoutPathChange={onLayoutPathChange} 
+            manifest={manifest}
+          />
+        )}
         {activeTab === 'streams' && (
           <StreamsPanel
             topics={topics}

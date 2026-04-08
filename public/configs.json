@@ -1,0 +1,4 @@
+[
+  { "id": "wheelchair", "name": "智能轮椅", "path": "layout/wheelchair.yaml" },
+  { "id": "fins", "name": "Fins 小车", "path": "layout/fins.yaml" }
+]

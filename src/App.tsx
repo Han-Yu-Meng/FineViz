@@ -12,7 +12,8 @@ import { DeckGLView } from './components/DeckGLView';
 import { collectLayoutTopics } from './lib/layoutTopics';
 
 export default function App() {
-  const { config, waypoints, loading } = useConfig();
+  const [layoutPath, setLayoutPath] = useState<string>('layout/wheelchair.yaml');
+  const { config, waypoints, manifest, loading } = useConfig(layoutPath);
   const { connected, topics, subscribe, messages, messageStats } = useFoxglove(config?.info?.server || '');
   const layoutTopics = useMemo(() => collectLayoutTopics(config), [config]);
   const layoutTopicNames = useMemo(() => layoutTopics.map((t) => t.name), [layoutTopics]);
@@ -72,6 +73,9 @@ export default function App() {
               onToggleTopicVisibility={toggleTopicVisibility}
               messages={messages} 
               messageStats={messageStats}
+              layoutPath={layoutPath}
+              onLayoutPathChange={setLayoutPath}
+              manifest={manifest}
             />
           </div>
         </div>
@@ -89,6 +93,9 @@ export default function App() {
             messages={messages} 
             messageStats={messageStats}
             activeTab={mobileTab}
+            layoutPath={layoutPath}
+            onLayoutPathChange={setLayoutPath}
+            manifest={manifest}
           />
         </div>
 

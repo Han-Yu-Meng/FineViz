@@ -1,6 +1,6 @@
 import React from 'react';
 import { Power, PowerOff, Gauge, Activity } from 'lucide-react';
-import { AppConfig } from '../../hooks/useConfig';
+import { AppConfig, ConfigManifest } from '../../hooks/useConfig';
 
 const iconMap: Record<string, React.ElementType> = {
   Power,
@@ -12,40 +12,50 @@ const iconMap: Record<string, React.ElementType> = {
 interface InfoPanelProps {
   config: AppConfig | null;
   connected: boolean;
+  layoutPath: string;
+  onLayoutPathChange: (path: string) => void;
+  manifest: ConfigManifest[];
 }
 
-export function InfoPanel({ config, connected }: InfoPanelProps) {
+export function InfoPanel({ config, connected, layoutPath, onLayoutPathChange, manifest }: InfoPanelProps) {
   if (!config) return null;
   
   const services = config.service ? Object.entries(config.service) : [];
 
   return (
     <div className="p-4 text-sm text-slate-700 space-y-6">
+      {/* Layout Selection */}
+      <div className="space-y-4">
+        <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2">Layout</h3>
+        <div>
+          <select 
+            id="layout-select"
+            className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+            value={layoutPath}
+            onChange={(e) => onLayoutPathChange(e.target.value)}
+          >
+            {manifest.map(item => (
+              <option key={item.id} value={item.path}>{item.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {/* Status section */}
       <div className="space-y-4">
-        <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2">Status</h3>
-        
-        <div className="flex items-center justify-between">
-          <div className="text-slate-500">Connection</div>
-          <div className="flex items-center gap-2">
-            <div className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-blue-500' : 'bg-rose-500'}`} />
-            <span className="font-medium">{connected ? 'Connected' : 'Disconnected'}</span>
+        <div className="relative group">
+          <div className="flex items-center gap-2 font-mono text-xs bg-slate-50 p-2 rounded border border-slate-200 break-all pr-8">
+            <div 
+              className={`shrink-0 w-2 h-2 rounded-full ${connected ? 'bg-blue-500 animate-pulse' : 'bg-rose-500'}`} 
+              title={connected ? 'Connected' : 'Offline'}
+            />
+            <span className="truncate">{config.info.server}</span>
           </div>
-        </div>
-
-        <div>
-          <div className="text-slate-500 mb-1">Name</div>
-          <div className="font-medium">{config.info.name}</div>
-        </div>
-        
-        <div>
-          <div className="text-slate-500 mb-1">WebSocket Server</div>
-          <div className="font-mono text-xs bg-slate-50 p-2 rounded border border-slate-200 break-all">{config.info.server}</div>
-        </div>
-        
-        <div>
-          <div className="text-slate-500 mb-1">API Server</div>
-          <div className="font-mono text-xs bg-slate-50 p-2 rounded border border-slate-200 break-all">{config.info.api_server}</div>
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <span className="text-[10px] uppercase font-bold text-slate-400">
+              {connected ? 'Live' : 'Off'}
+            </span>
+          </div>
         </div>
       </div>
 

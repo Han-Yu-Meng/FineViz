@@ -3,7 +3,6 @@ import YAML from 'yaml';
 
 export interface AppConfig {
   info: {
-    name: string;
     server: string;
     api_server: string;
   };
@@ -13,6 +12,12 @@ export interface AppConfig {
   tf: Record<string, any>;
 }
 
+export interface ConfigManifest {
+  id: string;
+  name: string;
+  path: string;
+}
+
 export interface Waypoint {
   id: number;
   name: string;
@@ -20,15 +25,24 @@ export interface Waypoint {
   orientation: { x: number; y: number; z: number; w: number };
 }
 
-export function useConfig() {
+export function useConfig(layoutPath: string = 'layout/wheelchair.yaml') {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+  const [manifest, setManifest] = useState<ConfigManifest[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    fetch('/configs.json')
+      .then(res => res.json())
+      .then(data => setManifest(data))
+      .catch(err => console.error('Failed to load configs manifest:', err));
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
     Promise.all([
-      fetch('/layout.yaml').then(res => res.text()),
-      fetch('/waypoints.yaml').then(res => res.text()).catch(() => '')
+      fetch(`/${layoutPath}`).then(res => res.text()),
+      fetch('/navigation/waypoints.yaml').then(res => res.text()).catch(() => '')
     ])
       .then(([layoutText, waypointsText]) => {
         const parsedLayout = YAML.parse(layoutText);
@@ -46,7 +60,7 @@ export function useConfig() {
         console.error('Failed to load config:', err);
         setLoading(false);
       });
-  }, []);
+  }, [layoutPath]);
 
-  return { config, waypoints, loading };
+  return { config, waypoints, manifest, loading };
 }
