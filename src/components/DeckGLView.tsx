@@ -271,8 +271,8 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
 
       axisData.push(
         { s: pos, t: [pos[0] + xAxis[0], pos[1] + xAxis[1], pos[2] + xAxis[2]], color: [255, 0, 0] },
-        { s: pos, t: [pos[0] + yAxis[0], pos[1] + yAxis[1], pos[2] + yAxis[2]], color: [0, 255, 0] },
-        { s: pos, t: [pos[0] + zAxis[0], pos[1] + zAxis[1], pos[2] + zAxis[2]], color: [0, 0, 255] }
+        { s: pos, t: [pos[0] - yAxis[0], pos[1] - yAxis[1], pos[2] - yAxis[2]], color: [0, 255, 0] },
+        { s: pos, t: [pos[0] - zAxis[0], pos[1] - zAxis[1], pos[2] - zAxis[2]], color: [0, 0, 255] }
       );
       labelData.push({ text: link.child, position: pos });
     });
