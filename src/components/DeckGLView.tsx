@@ -12,14 +12,17 @@ import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
 import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
 
+import { MapPin, Navigation } from 'lucide-react';
+
 interface DeckGLViewProps {
   config: AppConfig | null;
   waypoints: Waypoint[];
   messages: Record<string, any[]>;
   topicVisibility: Record<string, boolean>;
+  onSendMessage?: (topic: string, type: string, data: any) => void;
 }
 
-export function DeckGLView({ config, waypoints, messages, topicVisibility }: DeckGLViewProps) {
+export function DeckGLView({ config, waypoints, messages, topicVisibility, onSendMessage }: DeckGLViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
   const [viewState, setViewState] = useState({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
   const [renderFps, setRenderFps] = useState(0);
@@ -29,6 +32,11 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
   const [gridData, setGridData] = useState<Record<string, OccupancyGridData>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Goal pose state
+  const [isSettingGoal, setIsSettingGoal] = useState(false);
+  const [goalPosition, setGoalPosition] = useState<[number, number] | null>(null);
+  const [goalYaw, setGoalYaw] = useState<number>(0);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -332,6 +340,50 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
     ];
   }, [tfTree, fixedFrame, config?.tf]);
 
+  const onViewStateChange = useCallback(({ viewState }: any) => {
+    setViewState({ ...viewState, target: [viewState.target[0], viewState.target[1], 0] });
+  }, []);
+
+  const onDragStart = useCallback((info: any, event: any) => {
+    if (isSettingGoal && !goalPosition) {
+      setGoalPosition([info.coordinate[0], info.coordinate[1]]);
+      return true; // prevent panning
+    }
+  }, [isSettingGoal, goalPosition]);
+
+  const onDrag = useCallback((info: any, event: any) => {
+    if (isSettingGoal && goalPosition) {
+      const dx = info.coordinate[0] - goalPosition[0];
+      const dy = info.coordinate[1] - goalPosition[1];
+      setGoalYaw(Math.atan2(dy, dx));
+      return true; // prevent panning
+    }
+  }, [isSettingGoal, goalPosition]);
+
+  const onDragEnd = useCallback(() => {
+    if (isSettingGoal && goalPosition) {
+      const qz = Math.sin(goalYaw / 2);
+      const qw = Math.cos(goalYaw / 2);
+      
+      const poseData = {
+        header: {
+          frame_id: fixedFrame,
+          stamp: { sec: Math.floor(Date.now() / 1000), nanosec: (Date.now() % 1000) * 1000000 }
+        },
+        pose: {
+          position: { x: goalPosition[0], y: goalPosition[1], z: 0 },
+          orientation: { x: 0, y: 0, z: qz, w: qw }
+        }
+      };
+      
+      onSendMessage?.('/goal_pose', 'geometry_msgs/msg/PoseStamped', poseData);
+      
+      setIsSettingGoal(false);
+      setGoalPosition(null);
+      setGoalYaw(0);
+    }
+  }, [isSettingGoal, goalPosition, goalYaw, fixedFrame, onSendMessage]);
+
   const layers = useMemo(() => {
     const allGridLayers = Object.entries(gridData).map(([t, d]) => {
       if (!d || d.width <= 0 || d.height <= 0) return null;
@@ -421,6 +473,59 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       })
     ];
 
+    const goalLayer = goalPosition && isSettingGoal ? [
+      new PathLayer({
+        id: 'goal-arrow-composite',
+        data: [
+          // 线段部分
+          {
+            path: [
+              [goalPosition[0], goalPosition[1], 0.1],
+              [
+                goalPosition[0] + Math.cos(goalYaw) * 1.0,
+                goalPosition[1] + Math.sin(goalYaw) * 1.0,
+                0.1
+              ]
+            ],
+            width: 0.1,
+            widthMinPixels: 2
+          },
+          // 三角形箭头部分
+          {
+            path: [
+              [
+                goalPosition[0] + Math.cos(goalYaw) * 1.0 + Math.cos(goalYaw + Math.PI * 0.85) * 0.25,
+                goalPosition[1] + Math.sin(goalYaw) * 1.0 + Math.sin(goalYaw + Math.PI * 0.85) * 0.25,
+                0.1
+              ],
+              [
+                goalPosition[0] + Math.cos(goalYaw) * 1.0,
+                goalPosition[1] + Math.sin(goalYaw) * 1.0,
+                0.1
+              ],
+              [
+                goalPosition[0] + Math.cos(goalYaw) * 1.0 + Math.cos(goalYaw - Math.PI * 0.85) * 0.25,
+                goalPosition[1] + Math.sin(goalYaw) * 1.0 + Math.sin(goalYaw - Math.PI * 0.85) * 0.25,
+                0.1
+              ],
+              [
+                goalPosition[0] + Math.cos(goalYaw) * 1.0 + Math.cos(goalYaw + Math.PI * 0.85) * 0.25,
+                goalPosition[1] + Math.sin(goalYaw) * 1.0 + Math.sin(goalYaw + Math.PI * 0.85) * 0.25,
+                0.1
+              ]
+            ],
+            width: 0.1,
+            widthMinPixels: 2
+          }
+        ],
+        getPath: (d: any) => d.path,
+        getColor: [255, 50, 50, 255],
+        getWidth: (d: any) => d.width,
+        widthMinPixels: (d: any) => d.widthMinPixels,
+        pickable: false,
+      })
+    ] : [];
+
     return [
       new LineLayer({
         id: 'grid-bg',
@@ -430,9 +535,10 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
       ...behindGrids,
       ...dataLayers,
       ...normalGrids,
-      ...tfLayers
-    ];
-  }, [pointCloudData, pathData, markerData, gridData, tfLayers, tfTree, fixedFrame, config?.visualize]);
+      ...tfLayers,
+      ...goalLayer
+    ].filter(Boolean);
+  }, [pointCloudData, pathData, markerData, gridData, tfLayers, tfTree, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
@@ -440,18 +546,37 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility }: Dec
         _maxFPS={30}
         views={new OrbitView({ id: 'orbit' })}
         controller={{
-          dragMode: 'pan',
-          dragPan: true,
-          dragRotate: true,
+          dragMode: isSettingGoal ? 'rotate' : 'pan', // Change dragMode to prevent panning when setting goal
+          dragPan: !isSettingGoal,
+          dragRotate: !isSettingGoal,
           inertia: false, 
           scrollZoom: { speed: 0.02, smooth: false },
-          touchRotate: true
+          touchRotate: !isSettingGoal
         }}
         viewState={viewState}
         onViewStateChange={({ viewState }: any) => setViewState({ ...viewState, target: [viewState.target[0], viewState.target[1], 0] })}
+        onDragStart={onDragStart}
+        onDrag={onDrag}
+        onDragEnd={onDragEnd}
         onAfterRender={onAfterRender}
         layers={layers}
       />
+      
+      {/* Goal Setting UI */}
+      <div className="absolute top-4 right-4 flex flex-col gap-2">
+        <button
+          onClick={() => setIsSettingGoal(!isSettingGoal)}
+          className={`p-2 rounded-full shadow-lg transition-all ${
+            isSettingGoal 
+              ? 'bg-blue-600 text-white animate-pulse' 
+              : 'bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+          title="Send Goal Pose"
+        >
+          <Navigation size={24} className={isSettingGoal ? 'rotate-45' : ''} />
+        </button>
+      </div>
+
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
         <div className="bg-white/80 backdrop-blur-sm p-2 rounded text-xs font-mono shadow text-slate-700">
           Pts: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: {renderFps}

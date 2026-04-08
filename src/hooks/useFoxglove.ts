@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { FoxgloveClient } from '@foxglove/ws-protocol';
 import { parse } from '@foxglove/rosmsg';
-import { MessageReader } from '@foxglove/rosmsg2-serialization';
+import { MessageReader, MessageWriter } from '@foxglove/rosmsg2-serialization';
 
 export interface Topic {
   id: number;
@@ -23,9 +23,14 @@ export function useFoxglove(url: string) {
   const [messageStats, setMessageStats] = useState<Record<string, FrameStats>>({});
   const [retryCount, setRetryCount] = useState(0);
   
+  // Track client-side advertised channels
+  const clientAdvertisedChannelsRef = useRef<Map<string, number>>(new Map());
+  const nextClientChannelIdRef = useRef<number>(10000); // Start from a high range to avoid collisions
+
   const wsRef = useRef<WebSocket | null>(null);
   const topicsRef = useRef<Topic[]>([]);
   const readersRef = useRef<Map<number, MessageReader>>(new Map());
+  const writersRef = useRef<Map<number, MessageWriter>>(new Map());
   const frameTimesRef = useRef<Map<string, number[]>>(new Map());
   const frameCountsRef = useRef<Map<string, number>>(new Map());
   
@@ -121,8 +126,6 @@ export function useFoxglove(url: string) {
     foxgloveClient.on("advertise", (newTopics) => {
       console.log("收到话题列表 (原始):", newTopics);
       setTopics((prev) => {
-        // Foxglove SDK (C++ bridge) provides {id, topic, schemaName}
-        // Let's ensure we store the correct 'id' and 'name'
         const normalized = newTopics.map(t => ({
           id: (t as any).id,
           name: (t as any).topic || (t as any).name,
@@ -134,20 +137,34 @@ export function useFoxglove(url: string) {
         const nextTopics = [...prev, ...added];
         topicsRef.current = nextTopics;
 
-        // Build ROS2 CDR readers for topics that include schemas.
         for (const topic of added) {
-          if (topic.schema && !readersRef.current.has(topic.id)) {
+          if (topic.schema) {
             try {
               const definitions = parse(topic.schema, { ros2: true });
-              readersRef.current.set(topic.id, new MessageReader(definitions));
+              if (!readersRef.current.has(topic.id)) {
+                readersRef.current.set(topic.id, new MessageReader(definitions));
+              }
+              if (!writersRef.current.has(topic.id)) {
+                writersRef.current.set(topic.id, new MessageWriter(definitions));
+              }
             } catch (err) {
-              console.warn(`创建消息解析器失败: ${topic.name}`, err);
+              console.warn(`创建消息解析器/生成器失败: ${topic.name}`, err);
             }
           }
         }
 
         return nextTopics;
       });
+
+      // 自动通告并创建本地发布者 (用于 /goal_pose 等反向传输)
+      // 如果服务器没有通告这些话题，我们需要在这里主动注册给服务器，
+      // 以便服务器后续知道如何处理 sendMessage 传过去的 channelId。
+    });
+
+    foxgloveClient.on("serverInfo", (info) => {
+      if (info.capabilities && info.capabilities.includes("clientPublish")) {
+        console.log("服务器支持 clientPublish 能力");
+      }
     });
 
     foxgloveClient.on("unadvertise", (removedTopics) => {
@@ -233,6 +250,7 @@ export function useFoxglove(url: string) {
       foxgloveClient.close();
       ws.close();
       readersRef.current.clear();
+      writersRef.current.clear();
       topicsRef.current = [];
       frameTimesRef.current.clear();
       frameCountsRef.current.clear();
@@ -272,5 +290,62 @@ export function useFoxglove(url: string) {
     }
   }, [client, topics]);
 
-  return { client, connected, topics, messages, messageStats, subscribe, unsubscribe };
+  const publish = useCallback((topicName: string, schemaName: string, data: any) => {
+    if (!client) return;
+    
+    // Foxglove WebSocket Protocol requirement:
+    // To publish a message, the client must first 'advertise' the channel.
+    
+    let channelId = clientAdvertisedChannelsRef.current.get(topicName);
+    
+    if (channelId === undefined) {
+      // 1. Check if we have a schema definition for this schemaName from existing topics
+      const existingTopicWithSchema = topicsRef.current.find(t => t.schemaName === schemaName && t.schema);
+      
+      if (!existingTopicWithSchema) {
+        console.warn(`Cannot advertise ${topicName}: No schema found for ${schemaName}.`);
+        return;
+      }
+
+      // 2. Locally advertise to get a channel ID
+      channelId = nextClientChannelIdRef.current++;
+      clientAdvertisedChannelsRef.current.set(topicName, channelId);
+
+      // 3. Send 'advertise' operation to server
+      client.advertise({
+        id: channelId,
+        topic: topicName,
+        encoding: "cdr",
+        schemaName: schemaName,
+        schema: existingTopicWithSchema.schema
+      });
+      
+      console.log(`Advertised new channel: ${topicName} (ID: ${channelId}) with schema ${schemaName}`);
+
+      // 4. Ensure we have a writer for this new ID
+      try {
+        const definitions = parse(existingTopicWithSchema.schema!, { ros2: true });
+        writersRef.current.set(channelId, new MessageWriter(definitions));
+      } catch (err) {
+        console.error(`Failed to create writer for advertised topic ${topicName}:`, err);
+        return;
+      }
+    }
+
+    const writer = writersRef.current.get(channelId);
+    if (!writer) {
+      console.warn(`No writer available for channel ${channelId} (${topicName}).`);
+      return;
+    }
+
+    try {
+      const encoded = writer.writeMessage(data);
+      client.sendMessage(channelId, encoded);
+      console.log(`Sent message to ${topicName} via channel ID ${channelId}`);
+    } catch (err) {
+      console.error(`Failed to encode or send message to ${topicName}:`, err);
+    }
+  }, [client]);
+
+  return { client, connected, topics, messages, messageStats, subscribe, unsubscribe, publish };
 }

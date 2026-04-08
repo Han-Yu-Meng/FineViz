@@ -21,7 +21,7 @@ export default function App() {
     localStorage.setItem('fineviz-layout-path', layoutPath);
   }, [layoutPath]);
 
-  const { connected, topics, subscribe, messages, messageStats } = useFoxglove(config?.info?.server || '');
+  const { connected, topics, subscribe, messages, messageStats, publish } = useFoxglove(config?.info?.server || '');
   const layoutTopics = useMemo(() => collectLayoutTopics(config), [config]);
   const layoutTopicNames = useMemo(() => layoutTopics.map((t) => t.name), [layoutTopics]);
   const [topicVisibility, setTopicVisibility] = useState<Record<string, boolean>>({});
@@ -118,7 +118,13 @@ export default function App() {
         </button>
 
         <main className="flex-1 relative z-10 w-full h-full pb-safe">
-          <DeckGLView config={config} waypoints={waypoints} messages={messages} topicVisibility={topicVisibility} />
+          <DeckGLView 
+            config={config} 
+            waypoints={waypoints} 
+            messages={messages} 
+            topicVisibility={topicVisibility} 
+            onSendMessage={publish}
+          />
         </main>
       </div>
 
