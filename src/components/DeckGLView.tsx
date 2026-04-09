@@ -284,24 +284,21 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
       const worldMat = getFrameMatrix(link.child, tfTree, fixedFrame);
       const parentMat = getFrameMatrix(link.parent, tfTree, fixedFrame);
       
-      const pos = worldMat.getTranslation();
-      const pPos = parentMat.getTranslation();
+      // 直接利用矩阵特性，将局部坐标系原点 [0,0,0] 变换为世界坐标
+      const pos = worldMat.transform([0, 0, 0]);
+      const pPos = parentMat.transform([0, 0, 0]);
 
       lineData.push({ source: pPos, target: pos });
 
-      // Get pure rotation matrix from the world matrix
-      const q = new Quaternion();
-      worldMat.getRotation(q);
-      const rotationMat = new Matrix4().fromQuaternion(q);
-      
-      const xAxis = rotationMat.transformVector([axisLength, 0, 0]);
-      const yAxis = rotationMat.transformVector([0, axisLength, 0]);
-      const zAxis = rotationMat.transformVector([0, 0, axisLength]);
+      // 【核心修复】不使用四元数反向解析，直接将局部坐标轴尖端转换为世界绝对坐标
+      const xTip = worldMat.transform([axisLength, 0, 0]);
+      const yTip = worldMat.transform([0, axisLength, 0]);
+      const zTip = worldMat.transform([0, 0, axisLength]);
 
       axisData.push(
-        { s: pos, t: [pos[0] + xAxis[0], pos[1] + xAxis[1], pos[2] + xAxis[2]], color: [255, 0, 0] },
-        { s: pos, t: [pos[0] - yAxis[0], pos[1] - yAxis[1], pos[2] - yAxis[2]], color: [0, 255, 0] },
-        { s: pos, t: [pos[0] - zAxis[0], pos[1] - zAxis[1], pos[2] - zAxis[2]], color: [0, 0, 255] }
+        { s: pos, t: xTip, color: [255, 0, 0] },
+        { s: pos, t: yTip, color: [0, 255, 0] }, // 修正了原本的减号错误，回归右手系
+        { s: pos, t: zTip, color: [0, 0, 255] }  // 修正了原本的减号错误，回归右手系
       );
       if (labelVisualize) {
         labelData.push({ text: link.child, position: pos });

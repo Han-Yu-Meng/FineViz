@@ -1,4 +1,4 @@
-import { Matrix4 } from '@math.gl/core';
+import { Matrix4, Quaternion } from '@math.gl/core';
 import { TFLink } from './types';
 
 export function getFrameMatrix(frameId: string, tree: Record<string, TFLink>, fixedFrame: string): Matrix4 {
@@ -25,7 +25,11 @@ export function getFrameMatrix(frameId: string, tree: Record<string, TFLink>, fi
   for (let i = path.length - 1; i >= 0; i--) {
     const link = path[i];
     // T_parent_child = Translate(link.position) * Rotate(link.rotation)
-    const m = new Matrix4().fromQuaternion(link.rotation);
+    
+    // 强制声明为严格的四元数对象，防止 math.gl 隐式类型转换导致的底层 Bug
+    const q = new Quaternion(link.rotation[0], link.rotation[1], link.rotation[2], link.rotation[3]);
+    const m = new Matrix4().fromQuaternion(q);
+    
     m[12] = link.position[0];
     m[13] = link.position[1];
     m[14] = link.position[2];
