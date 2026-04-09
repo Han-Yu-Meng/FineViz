@@ -10,6 +10,9 @@ export interface AppConfig {
   service: Record<string, any>;
   chart: Record<string, any>;
   tf: Record<string, any>;
+  robot?: {
+    urdf?: string;
+  };
 }
 
 export interface ConfigManifest {

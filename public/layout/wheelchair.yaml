@@ -73,3 +73,6 @@ tf:
       parent: "odom"
       position: [0.550, 0.239, 0.193]
       rotation: [0.011, 0.113, -0.005, 0.994]
+
+robot:
+  urdf: "wheelchair/wheelchair.urdf"

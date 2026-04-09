@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<robot name="wheel_chair">
+  <link name="base_link">
+    <visual>
+      <origin
+        xyz="0.27278 0 -0.12165"
+        rpy="0 0 1.57079" />
+      <geometry>
+        <mesh
+          filename="package://meshes/wheel_chair.glb" />
+      </geometry>
+    </visual>
+  </link>
+
+  <link name="livox_frame_192_168_1_187">
+    <visual>
+      <origin
+        xyz="0 0 -0.04"
+        rpy="0 0 3.14159" />
+      <geometry>
+        <mesh
+          filename="package://meshes/mid360.glb" />
+      </geometry>
+    </visual>
+  </link>
+  
+  <link name="livox_frame_192_168_1_198">
+      <visual>
+      <origin
+        xyz="0 0 -0.04"
+        rpy="0 0 3.14159" />
+      <geometry>
+        <mesh
+          filename="package://meshes/mid360.glb" />
+      </geometry>
+    </visual>
+  </link>
+  
+  
+  <joint name="livox_frame_192_168_1_187" type="fixed">
+    <origin
+      xyz="0.54961 0.23901 0.19335"
+      rpy="0.0209 0.22689 -0.00698" /> <!-- 0  15°  0 -->
+    <parent
+      link="base_link" />
+    <child
+      link="livox_frame_192_168_1_187" />
+  </joint>
+  
+   
+  <joint name="livox_frame_192_168_1_198" type="fixed">
+    <origin
+      xyz="0.54961 -0.23901 0.16335"
+      rpy="-0.02269 0.22689 0.01396" /> <!-- 0  15°  0 -->
+    <parent
+      link="base_link" />
+    <child
+      link="livox_frame_192_168_1_198" />
+  </joint>
+
+</robot>

@@ -11,6 +11,9 @@ import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
 import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
+import { parseURDF, URDFRobot } from './render/urdfParser';
+import { loadGLB } from './render/meshLoader';
+import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 
 import { MapPin, Navigation } from 'lucide-react';
 
@@ -24,13 +27,15 @@ interface DeckGLViewProps {
 
 export function DeckGLView({ config, waypoints, messages, topicVisibility, onSendMessage }: DeckGLViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
-  const [viewState, setViewState] = useState({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
+  const [viewState, setViewState] = useState<{ target: [number, number, number], zoom: number, rotationX: number, rotationOrbit: number }>({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
   const [renderFps, setRenderFps] = useState(0);
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
   const [pathData, setPathData] = useState<Record<string, any>>({});
   const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
   const [gridData, setGridData] = useState<Record<string, OccupancyGridData>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
+  const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
+  const [meshModels, setMeshModels] = useState<Record<string, any>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Goal pose state
@@ -238,6 +243,43 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
   }, []);
 
   useEffect(() => {
+    if (config?.robot?.urdf) {
+      const urdfFullPath = config.robot.urdf;
+      const urdfDir = urdfFullPath.substring(0, urdfFullPath.lastIndexOf('/'));
+      const fullUrdfPath = `/models/${urdfFullPath}`.replace(/\/+/g, '/');
+      console.log(`[URDF] Fetching URDF from: ${fullUrdfPath}`);
+      fetch(fullUrdfPath)
+        .then(r => r.text())
+        .then(async xml => {
+          const robot = await parseURDF(xml, urdfFullPath);
+          setUrdfRobot(robot);
+          
+          // Pre-load all meshes
+          const meshesToLoad = new Set<string>();
+          Object.values(robot.links).forEach(link => {
+            link.visuals.forEach(v => {
+              if (v.geometry.mesh) {
+                meshesToLoad.add(v.geometry.mesh.filename);
+              }
+            });
+          });
+
+          for (const meshSubPath of meshesToLoad) {
+            try {
+              // Combine urdf directory with mesh relative path
+              const fullMeshPath = `/models/${urdfDir}/${meshSubPath}`.replace(/\/+/g, '/');
+              console.log(`[URDF] Loading mesh: ${fullMeshPath} (from subpath: ${meshSubPath})`);
+              const mesh = await loadGLB(fullMeshPath);
+              setMeshModels(prev => ({ ...prev, [meshSubPath]: mesh }));
+            } catch (err) {
+              console.warn(`Failed to load mesh ${meshSubPath}`, err);
+            }
+          }
+        });
+    }
+  }, [config?.robot?.urdf]);
+
+  useEffect(() => {
     const timer = setInterval(runDecode, 50);
     return () => clearInterval(timer);
   }, [runDecode]);
@@ -437,7 +479,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
         id: `grid-${t}-${d.frameId}-${d.width}-${d.height}`,
         image: d.canvas,
         bounds: [0, 0, d.width * d.resolution, d.height * d.resolution],
-        modelMatrix: finalMat.toArray(),
+        modelMatrix: finalMat as any,
         opacity: alpha,
         transparentColor: [0, 0, 0, 0], // 启用透明混合
         textureParameters: { 
@@ -469,7 +511,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
         return new PointCloudLayer({
           id: `${t}-${d.frameId}`,
           data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
-          sizeUnits: 'pixels', pointSize: d.pointSize ?? 1.5, opacity: d.alpha ?? 1.0, modelMatrix: mat4.toArray(),
+          sizeUnits: 'pixels', pointSize: d.pointSize ?? 1.5, opacity: d.alpha ?? 1.0, modelMatrix: mat4 as any,
           updateTriggers: { modelMatrix: [mat4.toArray()] }
         });
       }),
@@ -479,7 +521,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
           id: `path-${t}-${d.frameId}`,
           data: [{ path: d.path, color: d.color, width: d.width }],
           pickable: false, widthScale: 1, widthMinPixels: 2, getPath: (p: any) => p.path, getColor: (p: any) => p.color, getWidth: (p: any) => p.width,
-          modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
+          modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
         });
       }),
       ...Object.entries(markerData).flatMap(([t, frames]) => {
@@ -488,11 +530,11 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
           const subLayers: any[] = [];
           const spheres = markers.filter(m => m.type === 2);
           if (spheres.length > 0) subLayers.push(new ScatterplotLayer({
-            id: `marker-sphere-${t}-${frameId}`, data: spheres, getPosition: (d: MarkerPrimitive) => d.position, getFillColor: (d: MarkerPrimitive) => d.color, getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, radiusUnits: 'meters', modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
+            id: `marker-sphere-${t}-${frameId}`, data: spheres, getPosition: (d: MarkerPrimitive) => d.position, getFillColor: (d: MarkerPrimitive) => d.color, getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, radiusUnits: 'meters', modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
           }));
           const lineStrips = markers.filter(m => m.type === 4);
           if (lineStrips.length > 0) subLayers.push(new PathLayer({
-            id: `marker-linestrip-${t}-${frameId}`, data: lineStrips, getPath: (d: MarkerPrimitive) => d.points, getColor: (d: MarkerPrimitive) => d.color, getWidth: (d: MarkerPrimitive) => d.scale[0], widthUnits: 'meters', modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
+            id: `marker-linestrip-${t}-${frameId}`, data: lineStrips, getPath: (d: MarkerPrimitive) => d.points, getColor: (d: MarkerPrimitive) => d.color, getWidth: (d: MarkerPrimitive) => d.scale[0], widthUnits: 'meters', modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
           }));
           const lineLists = markers.filter(m => m.type === 5);
           if (lineLists.length > 0) {
@@ -502,13 +544,47 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
               return pairs;
             });
             subLayers.push(new LineLayer({
-              id: `marker-linelist-${t}-${frameId}`, data: linesData, getSourcePosition: (d: any) => d.source, getTargetPosition: (d: any) => d.target, getColor: (d: any) => d.color, getWidth: (d: any) => d.width, widthUnits: 'meters', modelMatrix: mat4.toArray(), updateTriggers: { modelMatrix: [mat4.toArray()] }
+              id: `marker-linelist-${t}-${frameId}`, data: linesData, getSourcePosition: (d: any) => d.source, getTargetPosition: (d: any) => d.target, getColor: (d: any) => d.color, getWidth: (d: any) => d.width, widthUnits: 'meters', modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
             }));
           }
           return subLayers;
         });
       })
     ];
+
+    const robotLayers: any[] = [];
+    if (urdfRobot) {
+      Object.keys(urdfRobot.links).forEach(linkName => {
+        const link = urdfRobot.links[linkName];
+        const mat4 = getFrameMatrix(linkName, tfTree, fixedFrame);
+        if (!mat4) return;
+        
+        link.visuals.forEach((v, idx) => {
+          if (v.geometry.mesh && meshModels[v.geometry.mesh.filename]) {
+             const visualMat = new Matrix4().multiplyRight(mat4);
+             
+             // Apply local offset rpy
+             // Simple rotation matrix from Euler angles (ROS uses XYZ intrinsic or ZYX extrinsic)
+             const r = v.origin.rpy[0];
+             const p = v.origin.rpy[1];
+             const y = v.origin.rpy[2];
+             const q = new Quaternion().rotateX(r).rotateY(p).rotateZ(y);
+
+             const localMat = new Matrix4().translate(v.origin.xyz).multiplyRight(new Matrix4().fromQuaternion(q));
+             const finalMat = visualMat.clone().multiplyRight(localMat);
+             
+             robotLayers.push(new SimpleMeshLayer({
+                id: `urdf-${linkName}-${idx}`,
+                data: [{}],
+                mesh: meshModels[v.geometry.mesh.filename],
+                modelMatrix: finalMat as any,
+                getColor: [200, 200, 200],
+                sizeScale: 1.0, 
+              }));
+          }
+        });
+      });
+    }
 
     const goalLayer = goalPosition && isSettingGoal ? [
       new PathLayer({
@@ -558,7 +634,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
         getPath: (d: any) => d.path,
         getColor: [255, 50, 50, 255],
         getWidth: (d: any) => d.width,
-        widthMinPixels: (d: any) => d.widthMinPixels,
+        widthMinPixels: 2,
         pickable: false,
       })
     ] : [];
@@ -572,15 +648,15 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
       ...behindGrids,
       ...dataLayers,
       ...normalGrids,
+      ...robotLayers,
       ...tfLayers,
       ...goalLayer
     ].filter(Boolean);
-  }, [pointCloudData, pathData, markerData, gridData, tfLayers, tfTree, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal]);
+  }, [pointCloudData, pathData, markerData, gridData, tfLayers, tfTree, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal, urdfRobot, meshModels]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
       <DeckGL
-        _maxFPS={30}
         views={new OrbitView({ id: 'orbit' })}
         controller={{
           dragMode: isSettingGoal ? 'rotate' : 'pan', // Change dragMode to prevent panning when setting goal
