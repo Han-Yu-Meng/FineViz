@@ -68,25 +68,17 @@ export function InfoPanel({ config, connected, layoutPath, onLayoutPathChange, m
               const Icon = iconMap[service.icon] || Activity;
               const hasPayload = service.payload && service.payload.length > 0;
               
-              // 优先使用 service.port，如果没有则尝试从 api_server 提取或使用默认
-              let apiUrl = "";
-              try {
-                const apiBase = config.info.api_server || `http://${window.location.hostname}:3000`;
-                const urlObj = new URL(apiBase);
-                if (service.port) {
-                  urlObj.port = service.port;
-                }
-                apiUrl = `${urlObj.origin}${service.url}`;
-              } catch (e) {
-                // 如果 api_server 格式不正确，回退到原始拼接逻辑
-                apiUrl = `${config.info.api_server || ""}${service.url}`;
-              }
+              // 【代理模式修复】由于网络环境问题，请求先发给 FineViz 代理，再由代理转发至 4000 端口
+              const apiUrl = `/api-proxy${service.url}`;
 
               const handleTrigger = async (payloadData?: any) => {
                 try {
                   const response = await fetch(apiUrl, {
                     method: service.method || 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      'x-target-port': service.port || '3000' 
+                    },
                     body: payloadData ? JSON.stringify(payloadData) : undefined
                   });
                   if (response.ok) {
