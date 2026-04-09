@@ -63,18 +63,91 @@ export function InfoPanel({ config, connected, layoutPath, onLayoutPathChange, m
       {services.length > 0 && (
         <div className="space-y-4">
           <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2">Services</h3>
-          <div className="flex flex-col gap-2">
-            {services.map(([key, service]) => {
+          <div className="flex flex-col gap-3">
+            {services.map(([key, service]: [string, any]) => {
               const Icon = iconMap[service.icon] || Activity;
+              const hasPayload = service.payload && service.payload.length > 0;
+              
+              // 优先使用 service.port，如果没有则尝试从 api_server 提取或使用默认
+              let apiUrl = "";
+              try {
+                const apiBase = config.info.api_server || `http://${window.location.hostname}:3000`;
+                const urlObj = new URL(apiBase);
+                if (service.port) {
+                  urlObj.port = service.port;
+                }
+                apiUrl = `${urlObj.origin}${service.url}`;
+              } catch (e) {
+                // 如果 api_server 格式不正确，回退到原始拼接逻辑
+                apiUrl = `${config.info.api_server || ""}${service.url}`;
+              }
+
+              const handleTrigger = async (payloadData?: any) => {
+                try {
+                  const response = await fetch(apiUrl, {
+                    method: service.method || 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payloadData ? JSON.stringify(payloadData) : undefined
+                  });
+                  if (response.ok) {
+                    console.log(`Successfully triggered ${key}`);
+                  } else {
+                    console.error(`Failed to trigger ${key}: ${response.statusText}`);
+                  }
+                } catch (err) {
+                  console.error(`Error triggering ${key}:`, err);
+                }
+              };
+
               return (
-                <button
-                  key={key}
-                  className="flex items-center justify-center gap-2 w-full px-3 py-2.5 bg-blue-50 hover:bg-blue-100 rounded-md text-sm font-medium transition-colors border border-blue-200 text-slate-700"
-                  onClick={() => console.log(`Trigger service: ${service.topic}`)}
-                >
-                  <Icon size={16} className="text-blue-600" />
-                  <span>{key}</span>
-                </button>
+                <div key={key} className="space-y-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon size={16} className="text-blue-600" />
+                    <span className="font-medium text-slate-800">{key}</span>
+                  </div>
+                  
+                  {hasPayload ? (
+                    <div className="space-y-2">
+                      {service.payload.map((field: any, idx: number) => {
+                        const fieldName = Object.keys(field)[0];
+                        const defaultValue = field[fieldName];
+                        return (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500 w-16 truncate">{fieldName}</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              className="flex-1 bg-white border border-slate-200 rounded px-2 py-1 text-xs"
+                              defaultValue={defaultValue}
+                              id={`input-${key}-${fieldName}`}
+                            />
+                          </div>
+                        );
+                      })}
+                      <button
+                        className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition-colors"
+                        onClick={() => {
+                          const payload: any = {};
+                          service.payload.forEach((field: any) => {
+                            const name = Object.keys(field)[0];
+                            const input = document.getElementById(`input-${key}-${name}`) as HTMLInputElement;
+                            payload[name] = parseFloat(input.value);
+                          });
+                          handleTrigger(payload);
+                        }}
+                      >
+                        Execute
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="w-full py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-xs font-medium transition-colors border border-blue-200"
+                      onClick={() => handleTrigger()}
+                    >
+                      Trigger
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>

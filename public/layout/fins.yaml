@@ -50,18 +50,23 @@ visualize:
  
 service:
   Startup:
-    topic: "/wheelchair/startup"
-    type: "std_srvs/srv/Trigger"
-    icon: "Power"
+    port: "4000"
+    url: "/navigation/start"
+    method: "POST"
+    icon: "Power" # 渲染为按钮
     
   Shutdown:
-    topic: "/wheelchair/shutdown"
-    type: "std_srvs/srv/Trigger"
-    icon: "PowerOff" 
+    port: "4000"
+    url: "/navigation/stop"
+    method: "POST"
+    icon: "PowerOff" # 渲染为按钮
    
   SetSpeed:
-    topic: "/wheelchair/set_speed"
-    type: "wheelchair_msgs/srv/SetSpeed"
+    port: "4000"
+    url: "/navigation/set_speed"
+    method: "POST"
+    payload: # 渲染为输入框+提交按钮
+      - speed: 0.5
     icon: "Gauge"
     
 chart:
