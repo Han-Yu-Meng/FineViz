@@ -26,17 +26,18 @@ export default defineConfig(({mode}) => {
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',      proxy: {
+      hmr: process.env.DISABLE_HMR !== 'true',
+      proxy: {
         '/api-proxy': {
-          target: 'http://127.0.0.1:3000', // 默认回退目标
+          target: 'http://127.0.0.1:4000',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api-proxy/, ''),
-          router: (req) => {
-            // 从请求头或查询参数中动态推断目标端口
+          bypass: (req, res, options) => {
             const targetPort = req.headers['x-target-port'] || '4000';
-            return `http://127.0.0.1:${targetPort}`;
+            options.target = `http://127.0.0.1:${targetPort}`;
           }
         },
-      },    },
+      },
+    },
   };
 });
