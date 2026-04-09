@@ -344,21 +344,61 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
     setViewState({ ...viewState, target: [viewState.target[0], viewState.target[1], 0] });
   }, []);
 
+  // 通过射线追踪算法，计算鼠标点击绝对对应地面的 [X, Y] 坐标
+  const getGroundCoordinate = useCallback((info: any): [number, number] | null => {
+    const viewport = info.viewport;
+    if (viewport && viewport.unproject && viewport.cameraPosition) {
+      // pFocal 是鼠标屏幕像素点反投影到 3D 焦平面上的坐标 [x, y, z]
+      const pFocal = viewport.unproject([info.x, info.y]);
+      // 相机的真实三维空间坐标
+      const cameraPos = viewport.cameraPosition;
+
+      if (pFocal && cameraPos) {
+        // 构造从相机中心发出，穿过鼠标焦点的射线方向向量
+        const dirX = pFocal[0] - cameraPos[0];
+        const dirY = pFocal[1] - cameraPos[1];
+        const dirZ = pFocal[2] - cameraPos[2];
+
+        // 只有当视线是朝向下方地面时（方向向量 Z 为负）才计算交点
+        if (dirZ < -1e-6) {
+          // 射线参数方程： Z = cameraPos.z + t * dirZ = 0
+          const t = -cameraPos[2] / dirZ;
+          return [
+            cameraPos[0] + t * dirX, 
+            cameraPos[1] + t * dirY
+          ];
+        }
+      }
+    }
+    
+    // Fallback: 极端情况下如果无法获取相机矩阵，回退到默认的坐标系
+    if (info.coordinate) {
+      return [info.coordinate[0], info.coordinate[1]];
+    }
+    return null;
+  }, []);
+
   const onDragStart = useCallback((info: any, event: any) => {
     if (isSettingGoal && !goalPosition) {
-      setGoalPosition([info.coordinate[0], info.coordinate[1]]);
-      return true; // prevent panning
+      const groundPos = getGroundCoordinate(info); // 使用真理级求交算法
+      if (groundPos) {
+        setGoalPosition(groundPos);
+        return true; // 阻止地图平移
+      }
     }
-  }, [isSettingGoal, goalPosition]);
+  }, [isSettingGoal, goalPosition, getGroundCoordinate]);
 
   const onDrag = useCallback((info: any, event: any) => {
     if (isSettingGoal && goalPosition) {
-      const dx = info.coordinate[0] - goalPosition[0];
-      const dy = info.coordinate[1] - goalPosition[1];
-      setGoalYaw(Math.atan2(dy, dx));
-      return true; // prevent panning
+      const groundPos = getGroundCoordinate(info); // 拖拽角度时也使用绝对算法
+      if (groundPos) {
+        const dx = groundPos[0] - goalPosition[0];
+        const dy = groundPos[1] - goalPosition[1];
+        setGoalYaw(Math.atan2(dy, dx));
+      }
+      return true; // 阻止地图平移
     }
-  }, [isSettingGoal, goalPosition]);
+  }, [isSettingGoal, goalPosition, getGroundCoordinate]);
 
   const onDragEnd = useCallback(() => {
     if (isSettingGoal && goalPosition) {
