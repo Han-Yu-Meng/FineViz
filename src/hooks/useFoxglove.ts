@@ -229,9 +229,7 @@ export function useFoxglove(url: string) {
         messageBufferRef.current[topicName] = [];
       }
       
-      // 所有话题统一仅保留最新的 2 帧！！(1 帧应用，1 帧后备缓冲)。历史轨迹需求下放到各个特定的子图表组件内部用极简数据(例如数字 array)自行缓存！
-      // 否则在 200Hz 场景下堆积任何原始 ROS 树包到主引擎中都会引发数兆每秒级的分配导致的 GC 和发热死机。
-      const MAX_LENGTH = 2; 
+      const MAX_LENGTH = 10; 
       
       const buffer = messageBufferRef.current[topicName];
       buffer.push(newMessage);

@@ -7,7 +7,7 @@ visualize:
     topic: "/cloud_registered"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: true
-    last_time: 40
+    last_time: 1
     point_size: 1
     color_field: "intensity"
     color_scheme: "turbo"
