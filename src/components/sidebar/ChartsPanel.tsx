@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppConfig } from '../../hooks/useConfig';
-import { RealtimeChart } from '../RealtimeChart';
+import { RealtimeChart } from './RealtimeChart';
 
 interface ChartsPanelProps {
   config: AppConfig | null;
