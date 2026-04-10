@@ -476,16 +476,16 @@ export function DeckGLView({
     const rotationX = Math.max(0, Math.min(85, nextViewState.rotationX));
     
     // ✅ 保命手段 2：检测到用户正在缩放/拖拽时
-    const isUserMoving = interactionState?.isDragging || interactionState?.isZooming || interactionState?.isPanning;
-    if (isUserMoving) {
-      isInteractingRef.current = true;
+    // const isUserMoving = interactionState?.isDragging || interactionState?.isZooming || interactionState?.isPanning;
+    // if (isUserMoving) {
+    //   isInteractingRef.current = true;
       
-      // 用户松手后 400ms 恢复数据更新
-      if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
-      interactionTimeoutRef.current = setTimeout(() => {
-        isInteractingRef.current = false;
-      }, 400);
-    }
+    //   // 用户松手后 400ms 恢复数据更新
+    //   if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
+    //   interactionTimeoutRef.current = setTimeout(() => {
+    //     isInteractingRef.current = false;
+    //   }, 400);
+    // }
 
     if (isFollowing) {
       const robotFrame = config?.robot?.base_frame || 'base_link';
