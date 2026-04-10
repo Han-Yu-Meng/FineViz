@@ -23,9 +23,21 @@ interface DeckGLViewProps {
   messages: Record<string, any[]>;
   topicVisibility: Record<string, boolean>;
   onSendMessage?: (topic: string, type: string, data: any) => void;
+  meshModels: Record<string, any>;
+  onMeshModelsChange: (models: Record<string, any>) => void;
+  showRobotModel: boolean;
 }
 
-export function DeckGLView({ config, waypoints, messages, topicVisibility, onSendMessage }: DeckGLViewProps) {
+export function DeckGLView({ 
+  config, 
+  waypoints, 
+  messages, 
+  topicVisibility, 
+  onSendMessage,
+  meshModels,
+  onMeshModelsChange,
+  showRobotModel
+}: DeckGLViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
   const [viewState, setViewState] = useState<{ target: [number, number, number], zoom: number, rotationX: number, rotationOrbit: number }>({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
   const [renderFps, setRenderFps] = useState(0);
@@ -35,7 +47,6 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
   const [gridData, setGridData] = useState<Record<string, OccupancyGridData>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
-  const [meshModels, setMeshModels] = useState<Record<string, any>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Goal pose state
@@ -264,17 +275,19 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
             });
           });
 
+          const loadedMeshes: Record<string, any> = { ...meshModels };
           for (const meshSubPath of meshesToLoad) {
             try {
               // Combine urdf directory with mesh relative path
               const fullMeshPath = `/models/${urdfDir}/${meshSubPath}`.replace(/\/+/g, '/');
               console.log(`[URDF] Loading mesh: ${fullMeshPath} (from subpath: ${meshSubPath})`);
               const mesh = await loadGLB(fullMeshPath);
-              setMeshModels(prev => ({ ...prev, [meshSubPath]: mesh }));
+              loadedMeshes[meshSubPath] = mesh;
             } catch (err) {
               console.warn(`Failed to load mesh ${meshSubPath}`, err);
             }
           }
+          onMeshModelsChange(loadedMeshes);
         });
     }
   }, [config?.robot?.urdf]);
@@ -553,7 +566,7 @@ export function DeckGLView({ config, waypoints, messages, topicVisibility, onSen
     ];
 
     const robotLayers: any[] = [];
-    if (urdfRobot) {
+    if (urdfRobot && showRobotModel) {
       Object.keys(urdfRobot.links).forEach(linkName => {
         const link = urdfRobot.links[linkName];
         const mat4 = getFrameMatrix(linkName, tfTree, fixedFrame);

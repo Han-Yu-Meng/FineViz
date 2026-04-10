@@ -21,6 +21,9 @@ interface SidebarProps {
   layoutPath: string;
   onLayoutPathChange: (path: string) => void;
   manifest: ConfigManifest[];
+  meshModels?: Record<string, any>;
+  showRobotModel: boolean;
+  onToggleRobotModel: () => void;
 }
 
 export function Sidebar({ 
@@ -35,7 +38,10 @@ export function Sidebar({
   onTabChange,
   layoutPath,
   onLayoutPathChange,
-  manifest
+  manifest,
+  meshModels,
+  showRobotModel,
+  onToggleRobotModel
 }: SidebarProps) {
   const [internalTab, setInternalTab] = useState<string>('info');
   
@@ -70,6 +76,9 @@ export function Sidebar({
             layoutPath={layoutPath} 
             onLayoutPathChange={onLayoutPathChange} 
             manifest={manifest}
+            meshModels={meshModels}
+            showRobotModel={showRobotModel}
+            onToggleRobotModel={onToggleRobotModel}
           />
         )}
         {activeTab === 'streams' && (

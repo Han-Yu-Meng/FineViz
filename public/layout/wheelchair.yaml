@@ -68,6 +68,11 @@ tf:
   hidden_frame:
     - "livox_frame_192_168_1_198" 
     - "livox_frame_192_168_1_187"
+    
+  axis_length: 0.2
+  axis_width: 0.05
+  axis_label_visualize: true
+
   fixed_transform:
     lidar_odom:
       parent: "odom"

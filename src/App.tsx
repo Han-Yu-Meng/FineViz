@@ -27,6 +27,8 @@ export default function App() {
   const [topicVisibility, setTopicVisibility] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mobileTab, setMobileTab] = useState<string>('map');
+  const [meshModels, setMeshModels] = useState<Record<string, any>>({});
+  const [showRobotModel, setShowRobotModel] = useState<boolean>(true);
 
   useEffect(() => {
     setTopicVisibility((prev) => {
@@ -83,6 +85,9 @@ export default function App() {
               layoutPath={layoutPath}
               onLayoutPathChange={setLayoutPath}
               manifest={manifest}
+              meshModels={meshModels}
+              showRobotModel={showRobotModel}
+              onToggleRobotModel={() => setShowRobotModel(!showRobotModel)}
             />
           </div>
         </div>
@@ -103,6 +108,9 @@ export default function App() {
             layoutPath={layoutPath}
             onLayoutPathChange={setLayoutPath}
             manifest={manifest}
+            meshModels={meshModels}
+            showRobotModel={showRobotModel}
+            onToggleRobotModel={() => setShowRobotModel(!showRobotModel)}
           />
         </div>
 
@@ -124,6 +132,9 @@ export default function App() {
             messages={messages} 
             topicVisibility={topicVisibility} 
             onSendMessage={publish}
+            meshModels={meshModels}
+            onMeshModelsChange={setMeshModels}
+            showRobotModel={showRobotModel}
           />
         </main>
       </div>

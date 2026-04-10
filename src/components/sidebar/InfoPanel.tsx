@@ -1,5 +1,5 @@
 import React from 'react';
-import { Power, PowerOff, Gauge, Activity } from 'lucide-react';
+import { Power, PowerOff, Gauge, Activity, Box, Eye, EyeOff } from 'lucide-react';
 import { AppConfig, ConfigManifest } from '../../hooks/useConfig';
 
 const iconMap: Record<string, React.ElementType> = {
@@ -15,12 +15,32 @@ interface InfoPanelProps {
   layoutPath: string;
   onLayoutPathChange: (path: string) => void;
   manifest: ConfigManifest[];
+  meshModels?: Record<string, any>;
+  showRobotModel: boolean;
+  onToggleRobotModel: () => void;
 }
 
-export function InfoPanel({ config, connected, layoutPath, onLayoutPathChange, manifest }: InfoPanelProps) {
+export function InfoPanel({ 
+  config, 
+  connected, 
+  layoutPath, 
+  onLayoutPathChange, 
+  manifest,
+  meshModels = {},
+  showRobotModel,
+  onToggleRobotModel
+}: InfoPanelProps) {
   if (!config) return null;
   
   const services = config.service ? Object.entries(config.service) : [];
+
+  // 计算模型统计信息
+  const modelStats = Object.entries(meshModels).map(([path, data]) => {
+    const positions = data.attributes?.positions?.value;
+    const faceCount = positions ? positions.length / 9 : 0; // 每个面3个顶点，每个顶点3个坐标
+    const fileName = path.split('/').pop() || path;
+    return { fileName, faceCount };
+  });
 
   return (
     <div className="p-4 text-sm text-slate-700 space-y-6">
@@ -57,6 +77,39 @@ export function InfoPanel({ config, connected, layoutPath, onLayoutPathChange, m
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Robot Model Info */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <h3 className="font-semibold text-slate-900">Robot Model</h3>
+          <button 
+            onClick={onToggleRobotModel}
+            className={`p-1 rounded hover:bg-slate-100 transition-colors ${showRobotModel ? 'text-blue-600' : 'text-slate-400'}`}
+            title={showRobotModel ? 'Hide Model' : 'Show Model'}
+          >
+            {showRobotModel ? <Eye size={18} /> : <EyeOff size={18} />}
+          </button>
+        </div>
+        
+        {modelStats.length > 0 ? (
+          <div className="space-y-2">
+            {modelStats.map((stat, i) => (
+              <div key={i} className="bg-slate-50 rounded p-2 border border-slate-200">
+                <div className="flex items-center gap-2 mb-1">
+                  <Box size={14} className="text-slate-500" />
+                  <span className="font-medium text-xs truncate" title={stat.fileName}>{stat.fileName}</span>
+                </div>
+                <div className="text-[10px] text-slate-500 flex justify-between">
+                  <span>Faces:</span>
+                  <span className="font-mono">{stat.faceCount.toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-slate-400 italic px-1">No meshes loaded</div>
+        )}
       </div>
 
       {/* Services section */}
