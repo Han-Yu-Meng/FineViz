@@ -49,6 +49,7 @@ export function DeckGLView({
   const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followOffset, setFollowOffset] = useState<[number, number, number]>([0, 0, 0]);
 
   // Goal pose state
   const [isSettingGoal, setIsSettingGoal] = useState(false);
@@ -298,6 +299,35 @@ export function DeckGLView({
     return () => clearInterval(timer);
   }, [runDecode]);
 
+  // Handle follow mode
+  useEffect(() => {
+    if (isFollowing) {
+      const robotFrame = config?.robot?.base_frame || 'base_link';
+      if (!tfTree[robotFrame]) return;
+      
+      const worldMat = getFrameMatrix(robotFrame, tfTree, fixedFrame);
+      const pos = worldMat.transform([0, 0, 0]);
+      
+      setViewState(prev => {
+        const targetX = pos[0] + followOffset[0];
+        const targetY = pos[1] + followOffset[1];
+        
+        if (Math.abs(prev.target[0] - targetX) < 1e-4 && Math.abs(prev.target[1] - targetY) < 1e-4) return prev;
+        return {
+          ...prev,
+          target: [targetX, targetY, 0]
+        };
+      });
+    }
+  }, [isFollowing, tfTree, fixedFrame, followOffset, config?.robot?.base_frame]);
+
+  // 监听跟随模式切换，进入跟随模式时重置偏移
+  useEffect(() => {
+    if (isFollowing) {
+      setFollowOffset([0, 0, 0]);
+    }
+  }, [isFollowing]);
+
   const onAfterRender = useCallback(() => {
     const n = performance.now();
     fTimesRef.current.push(n);
@@ -393,9 +423,27 @@ export function DeckGLView({
     ];
   }, [tfTree, fixedFrame, config?.tf]);
 
-  const onViewStateChange = useCallback(({ viewState }: any) => {
-    setViewState({ ...viewState, target: [viewState.target[0], viewState.target[1], 0] });
-  }, []);
+  const onViewStateChange = useCallback(({ viewState: nextViewState }: any) => {
+    // 限制俯仰角，防止反转
+    const rotationX = Math.max(0, Math.min(85, nextViewState.rotationX));
+    
+    if (isFollowing) {
+      const robotFrame = config?.robot?.base_frame || 'base_link';
+      if (tfTree[robotFrame]) {
+        const worldMat = getFrameMatrix(robotFrame, tfTree, fixedFrame);
+        const pos = worldMat.transform([0, 0, 0]);
+        
+        const newOffset: [number, number, number] = [
+          nextViewState.target[0] - pos[0],
+          nextViewState.target[1] - pos[1],
+          0
+        ];
+        setFollowOffset(newOffset);
+      }
+    }
+    
+    setViewState({ ...nextViewState, rotationX, target: [nextViewState.target[0], nextViewState.target[1], 0] });
+  }, [isFollowing, tfTree, fixedFrame, config?.robot?.base_frame]);
 
   // 通过射线追踪算法，计算鼠标点击绝对对应地面的 [X, Y] 坐标
   const getGroundCoordinate = useCallback((info: any): [number, number] | null => {
@@ -673,7 +721,7 @@ export function DeckGLView({
       <DeckGL
         views={new OrbitView({ id: 'orbit' })}
         controller={{
-          dragMode: isSettingGoal ? 'rotate' : 'pan', // Change dragMode to prevent panning when setting goal
+          dragMode: isSettingGoal ? 'rotate' : 'pan',
           dragPan: !isSettingGoal,
           dragRotate: !isSettingGoal,
           inertia: false, 
@@ -681,7 +729,7 @@ export function DeckGLView({
           touchRotate: !isSettingGoal
         }}
         viewState={viewState}
-        onViewStateChange={({ viewState }: any) => setViewState({ ...viewState, target: [viewState.target[0], viewState.target[1], 0] })}
+        onViewStateChange={onViewStateChange}
         onDragStart={onDragStart}
         onDrag={onDrag}
         onDragEnd={onDragEnd}
@@ -708,6 +756,16 @@ export function DeckGLView({
         <div className="bg-white/80 backdrop-blur-sm p-2 rounded text-xs font-mono shadow text-slate-700">
           Pts: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: {renderFps}
         </div>
+        <button 
+          onClick={() => {
+            if (!isFollowing) setFollowOffset([0, 0, 0]);
+            setIsFollowing(!isFollowing);
+          }}
+          className={`bg-white/80 backdrop-blur-sm p-1.5 rounded shadow focus:outline-none transition-colors ${isFollowing ? 'text-blue-600' : 'text-slate-600 hover:text-blue-600'}`}
+          title={isFollowing ? "Stop Following" : "Follow base_link"}
+        >
+          <Crosshair size={18} className={isFollowing ? 'animate-pulse' : ''} />
+        </button>
         <button 
           onClick={toggleFullscreen}
           className="bg-white/80 backdrop-blur-sm p-1.5 rounded shadow text-slate-600 hover:text-blue-600 focus:outline-none transition-colors"
