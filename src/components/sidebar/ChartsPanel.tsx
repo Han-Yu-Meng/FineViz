@@ -32,6 +32,7 @@ export function ChartsPanel({ config, messages }: ChartsPanelProps) {
               </div>
               <RealtimeChart 
                 topic={chart.topic} 
+                type={chart.type}
                 fields={chart.fields} 
                 colors={chart.colors} 
                 // 使用上面提取的常量，如果该 topic 还没数据，透传相同的引用地址

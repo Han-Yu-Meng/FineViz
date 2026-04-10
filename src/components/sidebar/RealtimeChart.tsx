@@ -2,129 +2,123 @@ import React, { useEffect, useRef } from 'react';
 
 interface RealtimeChartProps {
   topic: string;
+  type?: string; 
   fields: string[];
   colors: string[];
   messages: any[];
 }
 
 function getNestedValue(obj: any, path: string): number {
-  return path.split('.').reduce((o, key) => (o && o[key] !== undefined ? o[key] : 0), obj) || 0;
+  if (!obj) return 0;
+  const parts = path.split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current && typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return 0;
+    }
+  }
+  return typeof current === 'number' ? current : 0;
 }
 
-// 采用 React.memo + HTML5 Canvas 是高频实时图表解决内存溢出/掉帧的终极方案
-export const RealtimeChart = React.memo(function RealtimeChart({ topic, fields, colors, messages }: RealtimeChartProps) {
+// 定义显示的时间跨度：10秒
+const TIME_WINDOW_MS = 10000; 
+
+export const RealtimeChart = React.memo(function RealtimeChart({ topic, type, fields, colors, messages }: RealtimeChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  // 单一数组维护历史数据，不触发 React 状态重绘，绕过 VDOM Diff
   const historyRef = useRef<{ time: number; values: number[] }[]>([]);
   const lastTimeRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
 
-  const drawChart = () => {
+  const performDraw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // 获取设备物理像素比，防止 Retina 高分屏模糊
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    
-    // 如果尺寸为0（例如所在 Tab 隐藏时），直接跳过渲染
     if (rect.width === 0 || rect.height === 0) return;
 
-    // 缩放画布以适应屏幕像素密度
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     ctx.scale(dpr, dpr);
 
     const width = rect.width;
     const height = rect.height;
-
-    // 清空画布
     ctx.clearRect(0, 0, width, height);
 
     const data = historyRef.current;
-    if (data.length === 0) return;
+    
+    // --- 时间轴逻辑核心 ---
+    // 即使没有数据，也要以当前时间作为终点，实现“平滑滚动”
+    const now = Date.now();
+    const tMax = now;
+    const tMin = now - TIME_WINDOW_MS;
 
-    // 计算 Y 轴最大最小值用于自适应缩放
+    // 1. 计算 Y 轴缩放
     let min = Infinity;
     let max = -Infinity;
-    data.forEach(d => {
-      d.values.forEach(v => {
-        if (v < min) min = v;
-        if (v > max) max = v;
-      });
-    });
-
-    // 处理无波动或极值情况
-    if (min === max) {
-      min -= 1;
-      max += 1;
-    } else if (min === Infinity || max === -Infinity) {
-      min = 0;
-      max = 1;
-    }
     
-    // 增加 10% 的上下边距，防止线条贴边
-    const pad = (max - min) * 0.1;
-    min -= pad;
-    max += pad;
+    // 只根据当前可见窗口内的数据计算 Y 轴高度
+    const visibleData = data.filter(d => d.time > tMin);
+    
+    if (visibleData.length > 0) {
+      visibleData.forEach(d => {
+        d.values.forEach(v => {
+          if (v < min) min = v;
+          if (v > max) max = v;
+        });
+      });
+    }
 
-    // 绘图区域留白
-    const padding = { top: 5, right: 5, bottom: 5, left: 15 };
+    if (max - min < 0.1) {
+      const avg = visibleData.length > 0 ? (max + min) / 2 : 0;
+      min = avg - 0.5;
+      max = avg + 0.5;
+    } else {
+      const pad = (max - min) * 0.2;
+      min -= pad;
+      max += pad;
+    }
+
+    const padding = { top: 10, right: 10, bottom: 10, left: 35 };
     const drawW = width - padding.left - padding.right;
     const drawH = height - padding.top - padding.bottom;
 
-    // --- 绘制虚线网格和 Y 轴标签 ---
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.setLineDash([3, 3]);
+    // 2. 绘制网格线
+    ctx.strokeStyle = '#f1f5f9';
     ctx.lineWidth = 1;
-    ctx.fillStyle = '#64748b';
-    ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-
-    const steps = 4;
-    for (let i = 0; i <= steps; i++) {
-      const yVal = min + (max - min) * (i / steps);
-      const yPos = padding.top + drawH - (i / steps) * drawH;
-
-      // 网格线
-      ctx.beginPath();
+    ctx.beginPath();
+    for (let i = 0; i <= 4; i++) {
+      const yPos = padding.top + (i / 4) * drawH;
       ctx.moveTo(padding.left, yPos);
       ctx.lineTo(width - padding.right, yPos);
-      ctx.stroke();
-
-      // 轴刻度
-      let label = yVal.toFixed(2);
-      if (Math.abs(yVal) >= 1000) label = (yVal / 1000).toFixed(1) + 'k';
-      ctx.fillText(label, padding.left - 5, yPos);
+      
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'right';
+      const val = max - (i / 4) * (max - min);
+      ctx.fillText(val.toFixed(2), padding.left - 4, yPos + 3);
     }
-    ctx.setLineDash([]); // 重置虚线模式，准备画实线
+    ctx.stroke();
 
-    // --- 绘制数据折线 ---
-    if (data.length > 1) {
-      const tMin = data[0].time;
-      const tMax = data[data.length - 1].time;
-      const tRange = Math.max(tMax - tMin, 1);
-
+    // 3. 绘制折线
+    if (visibleData.length > 1) {
       fields.forEach((_, fIdx) => {
         ctx.beginPath();
         ctx.strokeStyle = colors[fIdx] || '#8884d8';
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
 
-        data.forEach((d, i) => {
-          const x = padding.left + ((d.time - tMin) / tRange) * drawW;
+        visibleData.forEach((d, i) => {
+          // 根据时间戳计算 X 坐标：(当前点时间 - 窗口起点) / 窗口总长度
+          const x = padding.left + ((d.time - tMin) / TIME_WINDOW_MS) * drawW;
           const y = padding.top + drawH - ((d.values[fIdx] - min) / (max - min)) * drawH;
-
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
+          
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
         });
         ctx.stroke();
       });
@@ -132,71 +126,54 @@ export const RealtimeChart = React.memo(function RealtimeChart({ topic, fields, 
   };
 
   useEffect(() => {
-    if (!messages || messages.length === 0) return;
+    // 处理新消息
+    if (messages && messages.length > 0) {
+      const lastReceived = lastTimeRef.current;
+      const newItems = messages.filter(msg => msg.receivedAt > lastReceived);
 
-    let hasNew = false;
-    const currentHistory = historyRef.current;
-    
-    // 只处理未被提取过的新消息
-    const newItems = messages.filter(msg => msg.receivedAt > lastTimeRef.current);
-
-    if (newItems.length > 0) {
-      newItems.forEach(msg => {
-        lastTimeRef.current = Math.max(lastTimeRef.current, msg.receivedAt);
-        const values = fields.map(f => getNestedValue(msg.data, f));
-        // 将解构出来的轻量级基础数字存入，彻底放手释放原始大体积 msg.data 对象
-        currentHistory.push({ time: msg.receivedAt, values });
-      });
-      hasNew = true;
-    }
-
-    if (hasNew) {
-      // 限制渲染点数。Canvas渲染极快，这里可以放宽到 150 提升视觉平滑度
-      const MAX_POINTS = 150;
-      if (currentHistory.length > MAX_POINTS) {
-        currentHistory.splice(0, currentHistory.length - MAX_POINTS);
-      }
-      
-      // 使用 Web 原生 requestAnimationFrame 进行重绘节流
-      if (!animationFrameRef.current) {
-        animationFrameRef.current = requestAnimationFrame(() => {
-          drawChart();
-          animationFrameRef.current = null;
+      if (newItems.length > 0) {
+        newItems.forEach(msg => {
+          lastTimeRef.current = Math.max(lastTimeRef.current, msg.receivedAt);
+          const values = fields.map(f => getNestedValue(msg.data, f));
+          historyRef.current.push({ time: msg.receivedAt, values });
         });
       }
     }
-  }, [messages, fields]);
 
-  // 处理窗体拖动或右侧边栏侧滑动画时的尺寸自适应
-  useEffect(() => {
-    const observer = new ResizeObserver(() => {
-      if (!animationFrameRef.current) {
-        animationFrameRef.current = requestAnimationFrame(() => {
-          drawChart();
-          animationFrameRef.current = null;
-        });
-      }
-    });
-    
-    if (canvasRef.current) {
-      observer.observe(canvasRef.current);
+    // 清理过期数据（超过窗口 2 秒的数据彻底删除，防止内存增长）
+    const now = Date.now();
+    const cutoff = now - TIME_WINDOW_MS - 2000;
+    if (historyRef.current.length > 0 && historyRef.current[0].time < cutoff) {
+      historyRef.current = historyRef.current.filter(d => d.time > cutoff);
     }
-    
+
+    // 启动/维持渲染循环
+    // 因为是基于时间的，即使没有新消息，我们也需要重绘来让曲线向左滚动
+    if (!animationFrameRef.current) {
+      const loop = () => {
+        performDraw();
+        animationFrameRef.current = requestAnimationFrame(loop);
+      };
+      animationFrameRef.current = requestAnimationFrame(loop);
+    }
+
     return () => {
-      observer.disconnect();
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     };
+  }, [messages, fields, topic]);
+
+  useEffect(() => {
+    const observer = new ResizeObserver(() => performDraw());
+    if (canvasRef.current) observer.observe(canvasRef.current);
+    return () => observer.disconnect();
   }, []);
 
   return (
-    <div className="h-32 w-full mt-2 relative">
-      <canvas 
-        ref={canvasRef} 
-        className="absolute inset-0 w-full h-full block" 
-        style={{ touchAction: 'none' }} 
-      />
+    <div className="h-32 w-full mt-2 relative border-t border-slate-100/50 overflow-hidden">
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
     </div>
   );
 });

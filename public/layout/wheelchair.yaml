@@ -55,12 +55,14 @@ service:
 chart:
   chart1:
     - topic: "/cmd_vel"
+      type: "geometry_msgs/msg/Twist"
       fields: ["linear.x", "angular.z"]
       colors: ["#E35D97", "#5DCEE3"]
 
   chart2:
     - topic: "/Odometry"
-      fields: ["linear.x", "angular.z"]
+      type: "nav_msgs/msg/Odometry"
+      fields: ["twist.twist.linear.x", "twist.twist.angular.z"]
       colors: ["#E35D97", "#5DE35D"]
       
 tf: 

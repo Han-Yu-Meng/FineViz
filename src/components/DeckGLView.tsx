@@ -725,7 +725,7 @@ export function DeckGLView({
           dragPan: !isSettingGoal,
           dragRotate: !isSettingGoal,
           inertia: false, 
-          scrollZoom: { speed: 0.02, smooth: false },
+          scrollZoom: { speed: 0.005, smooth: false },
           touchRotate: !isSettingGoal
         }}
         viewState={viewState}
