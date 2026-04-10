@@ -36,6 +36,11 @@ for (let i = 0; i < 256; i++) {
 export function getWarmColor(t: number) { return getWarmColorRaw(t); }
 export function getTurboColor(t: number) { return getTurboColorRaw(t); }
 
+const MAX_GLOBAL_POINTS = 300000; 
+const SHARED_POSITIONS = new Float32Array(MAX_GLOBAL_POINTS * 3);
+const SHARED_COLORS = new Uint8Array(MAX_GLOBAL_POINTS * 3);
+const SHARED_VALS = new Float32Array(MAX_GLOBAL_POINTS);
+
 export function readFieldValue(dataView: DataView, byteOffset: number, datatype: number, littleEndian: boolean): number {
   switch (datatype) {
     case 1: return dataView.getInt8(byteOffset);
@@ -59,12 +64,19 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
   const cf = colorField ? fields.find(f => f.name === colorField) : undefined;
   const bytes = msg.data instanceof Uint8Array ? msg.data : new Uint8Array(msg.data);
   const le = !msg.is_bigendian, step = msg.point_step, total = Math.min(msg.width * msg.height, Math.floor(bytes.byteLength / step));
-  const stride = Math.max(1, Math.ceil(total / targetMaxPoints));
+  
+  // 防止超过全局缓存最大值
+  const actualTarget = Math.min(targetMaxPoints, MAX_GLOBAL_POINTS);
+  const stride = Math.max(1, Math.ceil(total / actualTarget));
   const count = Math.ceil(total / stride);
-  const pos = new Float32Array(count * 3), col = new Uint8Array(count * 3), vals = cf ? new Float32Array(count) : null;
+  
+  // ✅ 优化 2: 复用全局数组，不再 new Float32Array
+  const pos = SHARED_POSITIONS; 
+  const col = SHARED_COLORS; 
+  const vals = cf ? SHARED_VALS : null;
+  
   let min = Infinity, max = -Infinity, idx = 0;
   
-  // CPU 开销优化: 尝试利用 Float32Array 处理字节对齐（大多数 lidar 和点云硬件是 4-byte 浮点对齐的）
   const isAlignedFloat = le && bytes.byteOffset % 4 === 0 && step % 4 === 0 && xf.offset % 4 === 0 && yf.offset % 4 === 0 && zf.offset % 4 === 0 && (!cf || (cf.offset % 4 === 0 && cf.datatype === 7));
 
   if (isAlignedFloat) {
@@ -103,17 +115,24 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
   }
 
   if (idx === 0) return null;
-  const fPos = pos.subarray(0, idx * 3), fCol = col.subarray(0, idx * 3);
+  
   if (cf && ['turbo', 'warm'].includes(colorScheme || '') && isFinite(min) && isFinite(max) && vals) {
     const lut = colorScheme === 'warm' ? WARM_LUT : TURBO_LUT;
     const r = Math.max(1e-6, max - min);
     const scale = 255 / r;
     for (let i = 0; i < idx; i++) {
         const cIdx = Math.max(0, Math.min(255, Math.floor((vals[i] - min) * scale))) * 3;
-        fCol[i * 3] = lut[cIdx];
-        fCol[i * 3 + 1] = lut[cIdx + 1];
-        fCol[i * 3 + 2] = lut[cIdx + 2];
+        col[i * 3] = lut[cIdx];
+        col[i * 3 + 1] = lut[cIdx + 1];
+        col[i * 3 + 2] = lut[cIdx + 2];
     }
   }
-  return { length: idx, positions: fPos as Float32Array, colors: fCol as Uint8Array, frameId };
+  
+  // ✅ 优化 2: 最后仅切片拷贝有效数据给 DeckGL，利用底层快速内存复制
+  return { 
+    length: idx, 
+    positions: pos.slice(0, idx * 3), 
+    colors: col.slice(0, idx * 3), 
+    frameId 
+  };
 }

@@ -17,6 +17,11 @@ import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
 
 import { MapPin, Navigation } from 'lucide-react';
 
+// 全局共享合并缓冲池，防止高频 new Float32Array
+const MAX_COMBINED_POINTS = 500000;
+const COMBINED_POSITIONS = new Float32Array(MAX_COMBINED_POINTS * 3);
+const COMBINED_COLORS = new Uint8Array(MAX_COMBINED_POINTS * 3);
+
 interface DeckGLViewProps {
   config: AppConfig | null;
   waypoints: Waypoint[];
@@ -41,8 +46,12 @@ export function DeckGLView({
   showRobotModel
 }: DeckGLViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
-  const [viewState, setViewState] = useState<{ target: [number, number, number], zoom: number, rotationX: number, rotationOrbit: number }>({ target: [0, 0, 0], zoom: 1, rotationX: 30, rotationOrbit: 0 });
+  const [viewState, setViewState] = useState<{ target: [number, number, number], zoom: number, rotationX: number, rotationOrbit: number }>({ target: [0, 0, 0], zoom: 6, rotationX: 30, rotationOrbit: 0 });
   const [renderFps, setRenderFps] = useState(0);
+
+  const [worldMatrices, setWorldMatrices] = useState<Record<string, number[]>>({});
+  const worldMatricesRef = useRef<Record<string, number[]>>({}); // 用于在回调中无依赖读取
+
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
   const [pathData, setPathData] = useState<Record<string, any>>({});
   const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
@@ -57,6 +66,9 @@ export function DeckGLView({
   const [isSettingGoal, setIsSettingGoal] = useState(false);
   const [goalPosition, setGoalPosition] = useState<[number, number] | null>(null);
   const [goalYaw, setGoalYaw] = useState<number>(0);
+
+  const isInteractingRef = useRef(false);
+  const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -83,6 +95,9 @@ export function DeckGLView({
   lMsgs.current = messages; lCfg.current = config; lVis.current = topicVisibility;
 
   const runDecode = useCallback(() => {
+    // ✅ 保命手段 3：如果用户正在缩放/拖拽地图，直接放弃本轮数据解析，不给机器添加任何负担
+    if (isInteractingRef.current) return;
+
     const msgs = lMsgs.current, cfg = lCfg.current, vis = lVis.current;
     if (!cfg) return;
 
@@ -103,15 +118,28 @@ export function DeckGLView({
         }
         return decoded;
       }).filter(r => r !== null) as PointCloudBinary[];
+      
       if (res.length > 0) {
-        const tLen = res.reduce((s, f) => s + f.length, 0);
-        const mP = new Float32Array(tLen * 3), mC = new Uint8Array(tLen * 3);
+        let totalLen = 0;
+        for (const f of res) totalLen += f.length;
+        
+        // 防溢出保护
+        if (totalLen > MAX_COMBINED_POINTS) totalLen = MAX_COMBINED_POINTS;
+        
         let off = 0;
-        for (const f of res) { mP.set(f.positions, off * 3); mC.set(f.colors, off * 3); off += f.length; }
+        for (const f of res) {
+          if (off + f.length > MAX_COMBINED_POINTS) break;
+          // ✅ 复用静态内存池，完全消除 GC 垃圾
+          COMBINED_POSITIONS.set(f.positions, off * 3);
+          COMBINED_COLORS.set(f.colors, off * 3);
+          off += f.length;
+        }
+        
         nextPc[c.topic] = { 
-          length: tLen, 
-          positions: mP, 
-          colors: mC, 
+          length: off, 
+          // 最后仅通过 slice 扣除我们需要的部分传给 DeckGL (底层内存连续拷贝，速度极快)
+          positions: COMBINED_POSITIONS.slice(0, off * 3), 
+          colors: COMBINED_COLORS.slice(0, off * 3), 
           frameId: res[0].frameId,
           pointSize: c.point_size,
           alpha: c.alpha
@@ -252,10 +280,21 @@ export function DeckGLView({
           });
         }
 
+        if (changed) {
+          // ✅ 核心优化：预计算所有 TF 矩阵缓存为原生定长数组，彻底消灭渲染时的 Matrix4 实例开销
+          const matrices: Record<string, number[]> = {};
+          matrices[fixedFrame] = new Matrix4().toArray();
+          Object.keys(next).forEach(frameId => {
+            matrices[frameId] = getFrameMatrix(frameId, next, fixedFrame).toArray();
+          });
+          setWorldMatrices(matrices);
+          worldMatricesRef.current = matrices;
+        }
+
         return changed ? next : prev;
       });
     }
-  }, []);
+  }, [fixedFrame]);
 
   useEffect(() => {
     if (config?.robot?.urdf) {
@@ -432,19 +471,31 @@ export function DeckGLView({
     ];
   }, [tfTree, fixedFrame, config?.tf]);
 
-  const onViewStateChange = useCallback(({ viewState: nextViewState }: any) => {
+  const onViewStateChange = useCallback(({ viewState: nextViewState, interactionState }: any) => {
     // 限制俯仰角，防止反转
     const rotationX = Math.max(0, Math.min(85, nextViewState.rotationX));
     
+    // ✅ 保命手段 2：检测到用户正在缩放/拖拽时
+    const isUserMoving = interactionState?.isDragging || interactionState?.isZooming || interactionState?.isPanning;
+    if (isUserMoving) {
+      isInteractingRef.current = true;
+      
+      // 用户松手后 400ms 恢复数据更新
+      if (interactionTimeoutRef.current) clearTimeout(interactionTimeoutRef.current);
+      interactionTimeoutRef.current = setTimeout(() => {
+        isInteractingRef.current = false;
+      }, 400);
+    }
+
     if (isFollowing) {
       const robotFrame = config?.robot?.base_frame || 'base_link';
-      if (tfTree[robotFrame]) {
-        const worldMat = getFrameMatrix(robotFrame, tfTree, fixedFrame);
-        const pos = worldMat.transform([0, 0, 0]);
-        
+      // ✅ 直接从缓存中读取，避免 120Hz 下创建 Matrix4 对象导致 GC 崩溃
+      const mat = worldMatricesRef.current[robotFrame];
+      if (mat) {
+        // Matrix4 的平移坐标 en 原生数组的 12, 13 索引处
         const newOffset: [number, number, number] = [
-          nextViewState.target[0] - pos[0],
-          nextViewState.target[1] - pos[1],
+          nextViewState.target[0] - mat[12],
+          nextViewState.target[1] - mat[13],
           0
         ];
         setFollowOffset(newOffset);
@@ -452,10 +503,11 @@ export function DeckGLView({
     }
     
     setViewState({ ...nextViewState, rotationX, target: [nextViewState.target[0], nextViewState.target[1], 0] });
-  }, [isFollowing, tfTree, fixedFrame, config?.robot?.base_frame]);
+  }, [isFollowing, config?.robot?.base_frame]);
 
   // 通过射线追踪算法，计算鼠标点击绝对对应地面的 [X, Y] 坐标
   const getGroundCoordinate = useCallback((info: any): [number, number] | null => {
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     const viewport = info.viewport;
     if (viewport && viewport.unproject && viewport.cameraPosition) {
       // pFocal 是鼠标屏幕像素点反投影到 3D 焦平面上的坐标 [x, y, z]
@@ -542,9 +594,10 @@ export function DeckGLView({
       const topicConfig = Object.entries(vConfigs).find(([_, c]: [string, any]) => c.topic === t)?.[1] as any;
       const alpha = topicConfig?.alpha ?? 1.0;
 
-      const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
+      const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame] || new Matrix4().toArray();
+      const baseMat = new Matrix4(matArray);
       const originMat = new Matrix4().translate(d.origin.position).multiplyRight(new Matrix4().fromQuaternion(d.origin.orientation));
-      const finalMat = mat4.clone().multiplyRight(originMat).translate([0, 0, 0]);
+      const finalMat = baseMat.multiplyRight(originMat);
       
       return new BitmapLayer({
         id: `grid-${t}-${d.frameId}-${d.width}-${d.height}`,
@@ -552,6 +605,7 @@ export function DeckGLView({
         bounds: [0, 0, d.width * d.resolution, d.height * d.resolution],
         modelMatrix: finalMat as any,
         opacity: alpha,
+        pickable: false, // ✅ 关键：禁止离屏拾取渲染
         transparentColor: [0, 0, 0, 0], // 启用透明混合
         textureParameters: { 
           minFilter: 'nearest', 
@@ -576,36 +630,44 @@ export function DeckGLView({
     const behindGrids = allGridLayers.filter(l => behindTopics.has((l?.id as string).split('-')[1]));
     const normalGrids = allGridLayers.filter(l => !behindTopics.has((l?.id as string).split('-')[1]));
 
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
     const dataLayers = [
       ...Object.entries(pointCloudData).map(([t, d]) => {
-        const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
+        // ✅ 直接获取缓存的矩阵定长数组，不占用 CPU
+        const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame] || new Matrix4().toArray();
         return new PointCloudLayer({
           id: `${t}-${d.frameId}`,
           data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
-          sizeUnits: 'pixels', pointSize: d.pointSize ?? 1.5, opacity: d.alpha ?? 1.0, modelMatrix: mat4 as any,
-          updateTriggers: { modelMatrix: [mat4.toArray()] }
+          sizeUnits: 'pixels', 
+          pointSize: d.pointSize ?? (isMobileDevice ? 1 : 1.5), // 移动端点径变小以减少重叠度
+          opacity: d.alpha ?? 1.0, 
+          modelMatrix: matArray as any,
+          pickable: false, // ✅ 极其关键：禁止拾取缓冲，防止 GPU 将 20 万点绘制两遍！
+          parameters: { depthTest: true, depthMask: true }, // ✅ 开启早期深度测试剔除
+          updateTriggers: { modelMatrix: matArray }
         });
       }),
       ...Object.entries(pathData).map(([t, d]) => {
-        const mat4 = getFrameMatrix(d.frameId, tfTree, fixedFrame);
+        const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame] || new Matrix4().toArray();
         return new PathLayer({
           id: `path-${t}-${d.frameId}`,
           data: [{ path: d.path, color: d.color, width: d.width }],
           pickable: false, widthScale: 1, widthMinPixels: 2, getPath: (p: any) => p.path, getColor: (p: any) => p.color, getWidth: (p: any) => p.width,
-          modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
+          modelMatrix: matArray as any, updateTriggers: { modelMatrix: matArray }
         });
       }),
       ...Object.entries(markerData).flatMap(([t, frames]) => {
         return Object.entries(frames).flatMap(([frameId, markers]) => {
-          const mat4 = getFrameMatrix(frameId, tfTree, fixedFrame);
+          const matArray = worldMatrices[frameId] || worldMatrices[fixedFrame] || new Matrix4().toArray();
           const subLayers: any[] = [];
           const spheres = markers.filter(m => m.type === 2);
           if (spheres.length > 0) subLayers.push(new ScatterplotLayer({
-            id: `marker-sphere-${t}-${frameId}`, data: spheres, getPosition: (d: MarkerPrimitive) => d.position, getFillColor: (d: MarkerPrimitive) => d.color, getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, radiusUnits: 'meters', modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
+            id: `marker-sphere-${t}-${frameId}`, data: spheres, getPosition: (d: MarkerPrimitive) => d.position, getFillColor: (d: MarkerPrimitive) => d.color, getRadius: (d: MarkerPrimitive) => d.scale[0] / 2, radiusUnits: 'meters', modelMatrix: matArray as any, updateTriggers: { modelMatrix: matArray }
           }));
           const lineStrips = markers.filter(m => m.type === 4);
           if (lineStrips.length > 0) subLayers.push(new PathLayer({
-            id: `marker-linestrip-${t}-${frameId}`, data: lineStrips, getPath: (d: MarkerPrimitive) => d.points, getColor: (d: MarkerPrimitive) => d.color, getWidth: (d: MarkerPrimitive) => d.scale[0], widthUnits: 'meters', modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
+            id: `marker-linestrip-${t}-${frameId}`, data: lineStrips, getPath: (d: MarkerPrimitive) => d.points, getColor: (d: MarkerPrimitive) => d.color, getWidth: (d: MarkerPrimitive) => d.scale[0], widthUnits: 'meters', modelMatrix: matArray as any, updateTriggers: { modelMatrix: matArray }
           }));
           const lineLists = markers.filter(m => m.type === 5);
           if (lineLists.length > 0) {
@@ -615,7 +677,7 @@ export function DeckGLView({
               return pairs;
             });
             subLayers.push(new LineLayer({
-              id: `marker-linelist-${t}-${frameId}`, data: linesData, getSourcePosition: (d: any) => d.source, getTargetPosition: (d: any) => d.target, getColor: (d: any) => d.color, getWidth: (d: any) => d.width, widthUnits: 'meters', modelMatrix: mat4 as any, updateTriggers: { modelMatrix: [mat4.toArray()] }
+              id: `marker-linelist-${t}-${frameId}`, data: linesData, getSourcePosition: (d: any) => d.source, getTargetPosition: (d: any) => d.target, getColor: (d: any) => d.color, getWidth: (d: any) => d.width, widthUnits: 'meters', modelMatrix: matArray as any, updateTriggers: { modelMatrix: matArray }
             }));
           }
           return subLayers;
@@ -627,12 +689,12 @@ export function DeckGLView({
     if (urdfRobot && showRobotModel) {
       Object.keys(urdfRobot.links).forEach(linkName => {
         const link = urdfRobot.links[linkName];
-        const mat4 = getFrameMatrix(linkName, tfTree, fixedFrame);
-        if (!mat4) return;
+        const matArray = worldMatrices[linkName] || worldMatrices[fixedFrame] || new Matrix4().toArray();
+        if (!matArray) return;
         
         link.visuals.forEach((v, idx) => {
           if (v.geometry.mesh && meshModels[v.geometry.mesh.filename]) {
-             const visualMat = new Matrix4().multiplyRight(mat4);
+             const visualMat = new Matrix4(matArray);
              
              // Apply local offset rpy
              // Simple rotation matrix from Euler angles (ROS uses XYZ intrinsic or ZYX extrinsic)
@@ -642,7 +704,7 @@ export function DeckGLView({
              const q = new Quaternion().rotateX(r).rotateY(p).rotateZ(y);
 
              const localMat = new Matrix4().translate(v.origin.xyz).multiplyRight(new Matrix4().fromQuaternion(q));
-             const finalMat = visualMat.clone().multiplyRight(localMat);
+             const finalMat = visualMat.multiplyRight(localMat);
              
              robotLayers.push(new SimpleMeshLayer({
                 id: `urdf-${linkName}-${idx}`,
@@ -651,6 +713,8 @@ export function DeckGLView({
                 modelMatrix: finalMat as any,
                 getColor: d => [255, 255, 255], // 让顶点颜色属性生效
                 sizeScale: 1.0, 
+                pickable: false,
+                updateTriggers: { modelMatrix: finalMat.toArray() }
               }));
           }
         });
@@ -723,12 +787,14 @@ export function DeckGLView({
       ...tfLayers,
       ...goalLayer
     ].filter(Boolean);
-  }, [pointCloudData, pathData, markerData, gridData, tfLayers, tfTree, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal, urdfRobot, meshModels]);
+  }, [pointCloudData, pathData, markerData, gridData, tfLayers, worldMatrices, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal, urdfRobot, meshModels, showRobotModel]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
       <DeckGL
         views={new OrbitView({ id: 'orbit' })}
+        // ✅ 保命手段 1：移动端关闭物理像素高清渲染，大幅降低 GPU 压力防止崩溃
+        useDevicePixels={/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? true : true}
         controller={{
           dragMode: isSettingGoal ? 'rotate' : 'pan',
           dragPan: !isSettingGoal,
