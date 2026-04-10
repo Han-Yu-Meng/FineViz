@@ -36,6 +36,52 @@ for (let i = 0; i < 256; i++) {
 export function getWarmColor(t: number) { return getWarmColorRaw(t); }
 export function getTurboColor(t: number) { return getTurboColorRaw(t); }
 
+export function decodePointCloudZeroCopy(msg: any, colorFieldName: string = 'intensity') {
+  if (!msg || !msg.fields || !msg.data) return null;
+  
+  const frameId = msg.header?.frame_id || 'map';
+  const fields = msg.fields as any[];
+  
+  const xf = fields.find(f => f.name === 'x');
+  if (!xf) return null;
+
+  // 查找用户想要着色的字段（比如 'intensity' 或 'z'）
+  const colorField = fields.find(f => f.name === colorFieldName);
+  const zField = fields.find(f => f.name === 'z');
+
+  const pointStep = msg.point_step; // 每点字节数 (如 16 或 32)
+  const pointCount = msg.width * msg.height; // 总点数
+
+  // 1. 获取底层二进制数据
+  let rawBytes = msg.data instanceof Uint8Array ? msg.data : new Uint8Array(msg.data);
+  let buffer = rawBytes.buffer;
+  let byteOffset = rawBytes.byteOffset;
+  let byteLength = rawBytes.byteLength;
+
+  // 2. 解决 Float32Array 的 4 字节内存对齐问题
+  // 如果内存偏移量不是 4 的倍数，必须进行一次极速原生拷贝
+  if (byteOffset % 4 !== 0) {
+    const alignedData = new Uint8Array(rawBytes); // 原生拷贝，速度极快
+    buffer = alignedData.buffer;
+    byteOffset = 0;
+    byteLength = alignedData.byteLength;
+  }
+
+  // 3. 包装成 Deck.gl 要求的 Float32Array 视图 (零拷贝或仅一次极速拷贝)
+  const f32View = new Float32Array(buffer, byteOffset, byteLength / 4);
+
+  return {
+    f32View,             // 给 DeckGL 的位置属性
+    pointCount,          // 总点数
+    pointStep,           // 步长 (Bytes)
+    xOffset: xf.offset,  // X 的偏移 (Bytes)
+    // 【新增】颜色标量的偏移
+    colorFieldOffset: colorField ? colorField.offset : (zField ? zField.offset : xf.offset), 
+    frameId,
+    timestamp: msg.receivedAt || Date.now() // 用于作为 Layer 的唯一 ID
+  };
+}
+
 const MAX_GLOBAL_POINTS = 300000; 
 const SHARED_POSITIONS = new Float32Array(MAX_GLOBAL_POINTS * 3);
 const SHARED_COLORS = new Uint8Array(MAX_GLOBAL_POINTS * 3);

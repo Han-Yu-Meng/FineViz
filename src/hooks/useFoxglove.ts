@@ -223,6 +223,7 @@ export function useFoxglove(url: string) {
         // rawData: event.data, 
         timestamp: event.timestamp,
         receivedAt: Date.now(),
+        uuid: `${event.subscriptionId}-${event.timestamp.sec}-${event.timestamp.nanosec}-${Math.random()}`
       };
 
       // JS 原生数组 push 远比 [...arr] 原地重新构建立即拷贝快几个数量级，缓解 GC 压力

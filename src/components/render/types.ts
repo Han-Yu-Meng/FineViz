@@ -5,6 +5,12 @@ export type PointCloudBinary = {
   frameId: string;
   pointSize?: number;
   alpha?: number;
+  // Zero-copy fields
+  rawBuffer?: Uint8Array;
+  pointCount?: number;
+  pointStep?: number;
+  xOffset?: number;
+  isZeroCopy?: boolean;
 };
 
 export interface TFLink {

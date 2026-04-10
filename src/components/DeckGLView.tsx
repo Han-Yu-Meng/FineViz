@@ -7,8 +7,9 @@ import { Matrix4, Quaternion } from '@math.gl/core';
 
 import { Maximize, Minimize, Crosshair } from 'lucide-react';
 import { PointCloudBinary, TFLink } from './render/types';
-import { decodePointCloud } from './render/pointCloudDecoder';
+import { decodePointCloud, decodePointCloudZeroCopy } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
+import { IntensityLayer } from './render/IntensityLayer';
 import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
 import { parseURDF, URDFRobot } from './render/urdfParser';
@@ -70,6 +71,9 @@ export function DeckGLView({
   const isInteractingRef = useRef(false);
   const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const layerCacheRef = useRef<Map<string, any>>(new Map());
+  const lastTfUpdateTime = useRef<number>(0);
+
   useEffect(() => {
     const onFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -102,52 +106,9 @@ export function DeckGLView({
     if (!cfg) return;
 
     // --- Update Point Cloud ---
-    const pcConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'sensor_msgs/msg/PointCloud2' && item?.topic);
-    const nextPc: Record<string, PointCloudBinary> = {};
-    const now = Date.now();
-    for (const c of pcConfigs as any[]) {
-      if (!(vis[c.topic] ?? true)) continue;
-      const m = msgs[c.topic] || [];
-      if (m.length === 0) continue;
-      const sel = c.listen_updates ? (c.last_time > 0 ? m.filter((msg: any) => (msg.receivedAt || 0) >= now - c.last_time * 1000) : [m[m.length - 1]]) : [m[m.length - 1]];
-      
-      const res = sel.map(s => {
-        const decoded = decodePointCloud(s.data, c.color_field, c.color_scheme, 100000);
-        if (decoded && decoded.frameId.startsWith('/')) {
-          decoded.frameId = decoded.frameId.substring(1);
-        }
-        return decoded;
-      }).filter(r => r !== null) as PointCloudBinary[];
-      
-      if (res.length > 0) {
-        let totalLen = 0;
-        for (const f of res) totalLen += f.length;
-        
-        // 防溢出保护
-        if (totalLen > MAX_COMBINED_POINTS) totalLen = MAX_COMBINED_POINTS;
-        
-        let off = 0;
-        for (const f of res) {
-          if (off + f.length > MAX_COMBINED_POINTS) break;
-          // ✅ 复用静态内存池，完全消除 GC 垃圾
-          COMBINED_POSITIONS.set(f.positions, off * 3);
-          COMBINED_COLORS.set(f.colors, off * 3);
-          off += f.length;
-        }
-        
-        nextPc[c.topic] = { 
-          length: off, 
-          // 最后仅通过 slice 扣除我们需要的部分传给 DeckGL (底层内存连续拷贝，速度极快)
-          positions: COMBINED_POSITIONS.slice(0, off * 3), 
-          colors: COMBINED_COLORS.slice(0, off * 3), 
-          frameId: res[0].frameId,
-          pointSize: c.point_size,
-          alpha: c.alpha
-        };
-      }
-    }
-    setPointCloudData(nextPc);
-
+    // ✅ 核心优化：不再在 runDecode 里拼接点云数组，改由 useMemo 直接从 messages 生成独立 Layer
+    // 这里的点云处理逻辑已移除，由下方的 useMemo 承接
+    
     // --- Update Path Data ---
     const pathConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'nav_msgs/msg/Path' && item?.topic);
     const nextPaths: Record<string, any> = {};
@@ -281,14 +242,20 @@ export function DeckGLView({
         }
 
         if (changed) {
-          // ✅ 核心优化：预计算所有 TF 矩阵缓存为原生定长数组，彻底消灭渲染时的 Matrix4 实例开销
-          const matrices: Record<string, number[]> = {};
-          matrices[fixedFrame] = new Matrix4().toArray();
-          Object.keys(next).forEach(frameId => {
-            matrices[frameId] = getFrameMatrix(frameId, next, fixedFrame).toArray();
-          });
-          setWorldMatrices(matrices);
-          worldMatricesRef.current = matrices;
+          const now = performance.now();
+          // ✅ 彻底解耦 TF 更新频率：限制 React 状态更新频率为 25fps (40ms)
+          // 3D 渲染由 Deck.gl 内部惯性维持，React 只要 25fps 就足够肉眼感觉流畅。
+          if (now - lastTfUpdateTime.current > 40) {
+            // ✅ 核心优化：预计算所有 TF 矩阵缓存为原生定长数组，彻底消灭渲染时的 Matrix4 实例开销
+            const matrices: Record<string, number[]> = {};
+            matrices[fixedFrame] = new Matrix4().toArray();
+            Object.keys(next).forEach(frameId => {
+              matrices[frameId] = getFrameMatrix(frameId, next, fixedFrame).toArray();
+            });
+            setWorldMatrices(matrices);
+            worldMatricesRef.current = matrices;
+            lastTfUpdateTime.current = now;
+          }
         }
 
         return changed ? next : prev;
@@ -631,23 +598,82 @@ export function DeckGLView({
     const normalGrids = allGridLayers.filter(l => !behindTopics.has((l?.id as string).split('-')[1]));
 
     const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const now = Date.now();
+
+    const getPointCloudLayers = () => {
+      const pcConfigs = Object.values(config?.visualize || {}).filter((item: any) => item?.type === 'sensor_msgs/msg/PointCloud2' && item?.topic);
+      const activeLayers: any[] = [];
+      const currentUuids = new Set<string>();
+
+      pcConfigs.forEach(c => {
+        if (!(topicVisibility[c.topic] ?? true)) return;
+        const m = messages[c.topic] || [];
+        const sel = c.listen_updates ? (c.last_time > 0 ? m.filter((msg: any) => msg && (msg.receivedAt || 0) >= now - c.last_time * 1000) : [m[m.length - 1]]) : [m[m.length - 1]];
+
+        sel.forEach((msg: any) => {
+          if (!msg || !msg.uuid) return;
+          currentUuids.add(msg.uuid);
+          
+          let frameId = msg.data?.header?.frame_id || 'map';
+          if (frameId.startsWith('/')) frameId = frameId.substring(1);
+          const worldMat = worldMatrices[frameId] || worldMatrices[fixedFrame];
+          
+          // 如果该消息的图层已存在，我们只更新它的 modelMatrix 属性，而不是重新 new
+          if (layerCacheRef.current.has(msg.uuid)) {
+            const existingLayer = layerCacheRef.current.get(msg.uuid);
+            // 在 Deck.gl 中 clone 非常快，用来更新 modelMatrix
+            const updatedLayer = existingLayer.clone({
+              modelMatrix: worldMat as any,
+              pointSize: c.point_size ?? (isMobileDevice ? 1 : 1.5),
+              opacity: c.alpha ?? 0.8,
+              minIntensity: c.min_intensity || 0,
+              maxIntensity: c.max_intensity || 200,
+              updateTriggers: { modelMatrix: worldMat }
+            });
+            layerCacheRef.current.set(msg.uuid, updatedLayer);
+            activeLayers.push(updatedLayer);
+          } else {
+            // 只有新消息才创建新图层
+            const decoded = decodePointCloudZeroCopy(msg.data, c.color_field || 'intensity');
+            if (!decoded) return;
+
+            const newLayer = new IntensityLayer({
+              id: `pc-${msg.uuid}`,
+              data: { 
+                length: decoded.pointCount, 
+                attributes: { 
+                  getPosition: { value: decoded.f32View, size: 3, stride: decoded.pointStep, offset: decoded.xOffset },
+                  instanceColorsScalar: { value: decoded.f32View, size: 1, stride: decoded.pointStep, offset: decoded.colorFieldOffset }
+                } 
+              },
+              minIntensity: c.min_intensity || 0,
+              maxIntensity: c.max_intensity || 200,
+              sizeUnits: 'pixels',
+              pointSize: c.point_size ?? (isMobileDevice ? 1 : 1.5),
+              opacity: c.alpha ?? 0.8,
+              modelMatrix: worldMat as any,
+              pickable: false,
+              parameters: { depthTest: true, depthMask: true },
+              updateTriggers: { modelMatrix: worldMat }
+            });
+            layerCacheRef.current.set(msg.uuid, newLayer);
+            activeLayers.push(newLayer);
+          }
+        });
+      });
+
+      // 清理老旧缓存
+      for (const uuid of layerCacheRef.current.keys()) {
+        if (!currentUuids.has(uuid)) {
+          layerCacheRef.current.delete(uuid);
+        }
+      }
+
+      return activeLayers;
+    };
 
     const dataLayers = [
-      ...Object.entries(pointCloudData).map(([t, d]) => {
-        // ✅ 直接获取缓存的矩阵定长数组，不占用 CPU
-        const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame] || new Matrix4().toArray();
-        return new PointCloudLayer({
-          id: `${t}-${d.frameId}`,
-          data: { length: d.length, attributes: { getPosition: { value: d.positions, size: 3 }, getColor: { value: d.colors, size: 3 } } },
-          sizeUnits: 'pixels', 
-          pointSize: d.pointSize ?? (isMobileDevice ? 1 : 1.5), // 移动端点径变小以减少重叠度
-          opacity: d.alpha ?? 1.0, 
-          modelMatrix: matArray as any,
-          pickable: false, // ✅ 极其关键：禁止拾取缓冲，防止 GPU 将 20 万点绘制两遍！
-          parameters: { depthTest: true, depthMask: true }, // ✅ 开启早期深度测试剔除
-          updateTriggers: { modelMatrix: matArray }
-        });
-      }),
+      ...getPointCloudLayers(),
       ...Object.entries(pathData).map(([t, d]) => {
         const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame] || new Matrix4().toArray();
         return new PathLayer({
