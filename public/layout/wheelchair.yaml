@@ -76,3 +76,4 @@ tf:
 
 robot:
   urdf: "wheelchair/wheelchair.urdf"
+  # urdf: "fins/fins.urdf"

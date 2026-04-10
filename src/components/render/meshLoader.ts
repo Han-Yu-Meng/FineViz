@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 const meshCache: Record<string, any> = {};
 const loader = new GLTFLoader();
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('/draco/'); // Path to the decoders in public/draco/
+loader.setDRACOLoader(dracoLoader);
 
 export async function loadGLB(url: string): Promise<any> {
   if (meshCache[url]) return meshCache[url];

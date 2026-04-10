@@ -67,7 +67,7 @@ export async function parseURDF(xmlText: string, urdfPath: string): Promise<URDF
       } : { xyz: [0, 0, 0], rpy: [0, 0, 0] };
 
       const geometry: any = {};
-      if (v.geometry.mesh) {
+      if (v.geometry && v.geometry.mesh) {
         let filename = v.geometry.mesh.filename;
         // Resolve package://
         if (filename.startsWith('package://')) {
@@ -78,7 +78,7 @@ export async function parseURDF(xmlText: string, urdfPath: string): Promise<URDF
           filename,
           scale: parseVector(v.geometry.mesh.scale, [1, 1, 1])
         };
-      } else if (v.geometry.box) {
+      } else if (v.geometry && v.geometry.box) {
         geometry.box = { size: parseVector(v.geometry.box.size) };
       }
       return { origin, geometry };
