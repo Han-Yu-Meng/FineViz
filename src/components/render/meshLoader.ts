@@ -26,6 +26,7 @@ export async function loadGLB(url: string): Promise<any> {
 
         const combinedPositions: number[] = [];
         const combinedNormals: number[] = [];
+        const combinedColors: number[] = [];
 
         scene.traverse((node) => {
           if ((node as THREE.Mesh).isMesh) {
@@ -36,9 +37,19 @@ export async function loadGLB(url: string): Promise<any> {
             
             const posAttr = geometry.attributes.position;
             const normalAttr = geometry.attributes.normal;
+            const colorAttr = geometry.attributes.color;
             if (!posAttr) return;
 
-            // 这里的 matrix 会包含我们上面设置的 scene.rotation
+            // 获取材质颜色
+            let meshColor = new THREE.Color(0xFFFFFF);
+            if (mesh.material) {
+              const mat = mesh.material as any;
+              if (mat.color) {
+                meshColor = mat.color;
+              }
+            }
+
+            // 这里的 matrix 会包含我们上面设置 of scene.rotation
             const matrix = mesh.matrixWorld;
             const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
 
@@ -54,6 +65,14 @@ export async function loadGLB(url: string): Promise<any> {
               } else {
                 combinedNormals.push(0, 1, 0);
               }
+
+              if (colorAttr) {
+                const color = new THREE.Color().fromBufferAttribute(colorAttr as any, i);
+                // 混合顶点颜色和材质颜色
+                combinedColors.push(color.r * meshColor.r, color.g * meshColor.g, color.b * meshColor.b);
+              } else {
+                combinedColors.push(meshColor.r, meshColor.g, meshColor.b);
+              }
             }
             geometry.dispose();
           }
@@ -67,7 +86,8 @@ export async function loadGLB(url: string): Promise<any> {
         const result = {
           attributes: {
             positions: { value: new Float32Array(combinedPositions), size: 3 },
-            normals: { value: new Float32Array(combinedNormals), size: 3 }
+            normals: { value: new Float32Array(combinedNormals), size: 3 },
+            colors: { value: new Float32Array(combinedColors), size: 3 }
           }
         };
 

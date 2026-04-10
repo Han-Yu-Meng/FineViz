@@ -591,7 +591,7 @@ export function DeckGLView({
                 data: [{}],
                 mesh: meshModels[v.geometry.mesh.filename],
                 modelMatrix: finalMat as any,
-                getColor: [200, 200, 200],
+                getColor: d => [255, 255, 255], // 让顶点颜色属性生效
                 sizeScale: 1.0, 
               }));
           }
