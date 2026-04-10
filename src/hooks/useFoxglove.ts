@@ -63,7 +63,7 @@ export function useFoxglove(url: string) {
         }
         return changed ? next : prev;
       });
-    }, 50); // 20Hz 的 React 状态同步率
+    }, 100); // 20Hz 的 React 状态同步率
     return () => clearInterval(timer);
   }, []);
 
@@ -219,7 +219,8 @@ export function useFoxglove(url: string) {
 
       const newMessage = {
         data: decodedData,
-        rawData: event.data,
+        // 核心修复：移除对 event.data (Uint8Array) 的引用，防止原始二进制缓冲区无法被 GC 回收
+        // rawData: event.data, 
         timestamp: event.timestamp,
         receivedAt: Date.now(),
       };

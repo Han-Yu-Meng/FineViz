@@ -7,6 +7,9 @@ interface ChartsPanelProps {
   messages: Record<string, any[]>;
 }
 
+// 【修复 3】提取成文件级常量。防止每次渲染时创建新的 [] 导致 React.memo 失效
+const EMPTY_MESSAGES: any[] = [];
+
 export function ChartsPanel({ config, messages }: ChartsPanelProps) {
   if (!config?.chart) return <div className="text-slate-500 text-sm text-center py-8">No charts configured</div>;
   
@@ -31,7 +34,8 @@ export function ChartsPanel({ config, messages }: ChartsPanelProps) {
                 topic={chart.topic} 
                 fields={chart.fields} 
                 colors={chart.colors} 
-                messages={messages[chart.topic] || []} 
+                // 使用上面提取的常量，如果该 topic 还没数据，透传相同的引用地址
+                messages={messages[chart.topic] || EMPTY_MESSAGES} 
               />
             </div>
           ))}

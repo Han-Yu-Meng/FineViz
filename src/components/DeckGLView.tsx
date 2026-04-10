@@ -5,7 +5,7 @@ import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer, Bit
 import { AppConfig, Waypoint } from '../hooks/useConfig';
 import { Matrix4, Quaternion } from '@math.gl/core';
 
-import { Maximize, Minimize } from 'lucide-react';
+import { Maximize, Minimize, Crosshair } from 'lucide-react';
 import { PointCloudBinary, TFLink } from './render/types';
 import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
@@ -48,6 +48,7 @@ export function DeckGLView({
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
 
   // Goal pose state
   const [isSettingGoal, setIsSettingGoal] = useState(false);
@@ -293,7 +294,7 @@ export function DeckGLView({
   }, [config?.robot?.urdf]);
 
   useEffect(() => {
-    const timer = setInterval(runDecode, 50);
+    const timer = setInterval(runDecode, 100);
     return () => clearInterval(timer);
   }, [runDecode]);
 
