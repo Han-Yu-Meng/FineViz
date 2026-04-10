@@ -17,6 +17,8 @@ interface StreamsPanelProps {
 function getTopicIcon(topicType: string) {
   if (topicType === 'sensor_msgs/msg/PointCloud2') return Layers;
   if (topicType === 'nav_msgs/msg/Path') return Route;
+  if (topicType === 'nav_msgs/msg/Odometry') return Route;
+  if (topicType.includes('/action/')) return Route;
   if (topicType.includes('/srv/')) return Wrench;
   return Activity;
 }

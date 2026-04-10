@@ -8,29 +8,50 @@ interface TransformsPanelProps {
   config: AppConfig | null;
   messages: Record<string, any[]>;
   messageStats: Record<string, FrameStats>;
+  tfVisibility: Record<string, boolean>;
+  onToggleTfVisibility: (frameId: string) => void;
 }
 
-export function TransformsPanel({ config, messages, messageStats }: TransformsPanelProps) {
+export function TransformsPanel({ config, messages, messageStats, tfVisibility, onToggleTfVisibility }: TransformsPanelProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const fixedFrame = config?.tf?.fixed_frame || 'map';
-  const hiddenFrames = useMemo(() => new Set(config?.tf?.hidden_frame || []), [config]);
+  const hiddenOnesInConfig = useMemo(() => new Set(config?.tf?.hidden_frame || []), [config]);
 
   const toggleExpand = (id: string) => {
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const transforms = useMemo(() => {
-    const rawTf = [...(messages['/tf'] || []), ...(messages['/tf_static'] || [])];
+    // 性能优化：反向遍历最新消息以减少 seen 过滤的开销
+    const rawTf = [...(messages['/tf'] || []), ...(messages['/tf_static'] || [])].reverse();
     const nodes: Record<string, any> = {
       [fixedFrame]: { id: fixedFrame, name: fixedFrame, children: [] }
     };
     
     const seen = new Set();
+
+    // 1. 处理静态配置中的固定变换 (fixed_transform)
+    if (config?.tf?.fixed_transform) {
+      Object.entries(config.tf.fixed_transform).forEach(([child, transform]: [string, any]) => {
+        const parent = transform.parent;
+        if (seen.has(child)) return;
+        seen.add(child);
+
+        if (!nodes[parent]) nodes[parent] = { id: parent, name: parent, children: [] };
+        if (!nodes[child]) nodes[child] = { id: child, name: child, children: [] };
+        nodes[parent].children.push(nodes[child]);
+      });
+    }
+
+    // 2. 处理实时消息中的 TF 
     rawTf.forEach(msg => {
       const ts = msg.data?.transforms || msg.transforms || [];
       ts.forEach((t: any) => {
-        const p = t.header.frame_id;
-        const c = t.child_frame_id;
+        let p = t.header.frame_id;
+        let c = t.child_frame_id;
+        if (p.startsWith('/')) p = p.substring(1);
+        if (c.startsWith('/')) c = c.substring(1);
+        
         if (seen.has(c)) return;
         seen.add(c);
 
@@ -45,7 +66,12 @@ export function TransformsPanel({ config, messages, messageStats }: TransformsPa
 
   const renderNode = (node: any, depth = 0) => {
     const isExpanded = expanded[node.id] ?? true;
-    const isHidden = hiddenFrames.has(node.id);
+    
+    // 如果 tfVisibility 中有记录，以它为准；否则看 config 中的初始设置
+    const isHidden = tfVisibility[node.id] !== undefined 
+      ? !tfVisibility[node.id] 
+      : hiddenOnesInConfig.has(node.id);
+
     const hasChildren = node.children && node.children.length > 0;
 
     return (
@@ -56,19 +82,32 @@ export function TransformsPanel({ config, messages, messageStats }: TransformsPa
             isHidden && "opacity-40"
           )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onClick={() => hasChildren && toggleExpand(node.id)}
         >
-          {hasChildren ? (
-            isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />
-          ) : (
-            <div className="w-3.5" />
-          )}
-          <Network size={14} className={cn("shrink-0", isHidden ? "text-slate-400" : "text-blue-500")} />
-          <span className={cn("text-xs font-mono truncate flex-1", node.id === fixedFrame && "font-bold text-blue-600")}>
-            {node.name}
-            {node.id === fixedFrame && <span className="ml-2 text-[10px] bg-blue-100 text-blue-600 px-1 rounded">FIXED</span>}
-          </span>
-          {isHidden ? <EyeOff size={12} className="text-slate-400 opacity-0 group-hover:opacity-100" /> : <Eye size={12} className="text-slate-400 opacity-0 group-hover:opacity-100" />}
+          <div 
+            className="flex items-center gap-1 flex-1 min-w-0"
+            onClick={() => hasChildren && toggleExpand(node.id)}
+          >
+            {hasChildren ? (
+              isExpanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />
+            ) : (
+              <div className="w-3.5" />
+            )}
+            <Network size={14} className={cn("shrink-0", isHidden ? "text-slate-400" : "text-blue-500")} />
+            <span className={cn("text-xs font-mono truncate", node.id === fixedFrame && "font-bold text-blue-600")}>
+              {node.name}
+              {node.id === fixedFrame && <span className="ml-2 text-[10px] bg-blue-100 text-blue-600 px-1 rounded">FIXED</span>}
+            </span>
+          </div>
+          
+          <button 
+            className="p-1 hover:bg-slate-200 rounded text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleTfVisibility(node.id);
+            }}
+          >
+            {isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
         </div>
         {hasChildren && isExpanded && (
           <div className="border-l border-slate-100 ml-3.5">

@@ -14,6 +14,8 @@ interface SidebarProps {
   connected: boolean;
   topicVisibility: Record<string, boolean>;
   onToggleTopicVisibility: (topicName: string) => void;
+  tfVisibility: Record<string, boolean>;
+  onToggleTfVisibility: (frameId: string) => void;
   messages: Record<string, any[]>;
   messageStats: Record<string, FrameStats>;
   activeTab?: string;
@@ -32,6 +34,8 @@ export function Sidebar({
   connected,
   topicVisibility, 
   onToggleTopicVisibility, 
+  tfVisibility,
+  onToggleTfVisibility,
   messages, 
   messageStats,
   activeTab: externalTab,
@@ -91,7 +95,15 @@ export function Sidebar({
             onToggleTopicVisibility={onToggleTopicVisibility}
           />
         )}
-        {activeTab === 'transforms' && <TransformsPanel config={config} messages={messages} messageStats={messageStats} />}
+        {activeTab === 'transforms' && (
+          <TransformsPanel 
+            config={config} 
+            messages={messages} 
+            messageStats={messageStats} 
+            tfVisibility={tfVisibility}
+            onToggleTfVisibility={onToggleTfVisibility}
+          />
+        )}
         {activeTab === 'charts' && <ChartsPanel config={config} messages={messages} />}
       </div>
     </div>

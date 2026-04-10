@@ -25,6 +25,7 @@ export default function App() {
   const layoutTopics = useMemo(() => collectLayoutTopics(config), [config]);
   const layoutTopicNames = useMemo(() => layoutTopics.map((t) => t.name), [layoutTopics]);
   const [topicVisibility, setTopicVisibility] = useState<Record<string, boolean>>({});
+  const [tfVisibility, setTfVisibility] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mobileTab, setMobileTab] = useState<string>('map');
   const [meshModels, setMeshModels] = useState<Record<string, any>>({});
@@ -40,6 +41,20 @@ export default function App() {
     });
   }, [layoutTopicNames]);
 
+  // 从配置中初始化 TF 的可见性
+  useEffect(() => {
+    if (!config?.tf) return;
+    setTfVisibility((prev) => {
+      const next = { ...prev };
+      const hiddenOnes = new Set(config.tf.hidden_frame || []);
+      
+      // 这里的逻辑：如果 prev 中没有该 frame 的记录，则按配置文件初始化
+      // 如果已经有了，保持用户在 UI 上的操作状态
+      // 我们在 TransformsPanel 渲染时也会发现新 frame
+      return next;
+    });
+  }, [config?.tf]);
+
   useEffect(() => {
     if (!connected) return;
     layoutTopicNames.forEach((topicName) => subscribe(topicName));
@@ -51,6 +66,17 @@ export default function App() {
       [topicName]: !(prev[topicName] ?? true),
     }));
   }, []);
+
+  const toggleTfVisibility = useCallback((frameId: string) => {
+    setTfVisibility((prev) => {
+      // 如果之前从未记录（且配置中不在隐藏列表），则默认为显示(true)，取反为隐藏(false)
+      const current = prev[frameId] ?? !(config?.tf?.hidden_frame || []).includes(frameId);
+      return {
+        ...prev,
+        [frameId]: !current,
+      };
+    });
+  }, [config?.tf?.hidden_frame]);
 
   if (loading) {
     return (
@@ -80,6 +106,8 @@ export default function App() {
               connected={connected} 
               topicVisibility={topicVisibility}
               onToggleTopicVisibility={toggleTopicVisibility}
+              tfVisibility={tfVisibility}
+              onToggleTfVisibility={toggleTfVisibility}
               messages={messages} 
               messageStats={messageStats}
               layoutPath={layoutPath}
@@ -105,6 +133,8 @@ export default function App() {
             messages={messages} 
             messageStats={messageStats}
             activeTab={mobileTab}
+            tfVisibility={tfVisibility}
+            onToggleTfVisibility={toggleTfVisibility}
             layoutPath={layoutPath}
             onLayoutPathChange={setLayoutPath}
             manifest={manifest}
@@ -131,6 +161,7 @@ export default function App() {
             waypoints={waypoints} 
             messages={messages} 
             topicVisibility={topicVisibility} 
+            tfVisibility={tfVisibility}
             onSendMessage={publish}
             meshModels={meshModels}
             onMeshModelsChange={setMeshModels}

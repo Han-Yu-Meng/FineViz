@@ -22,6 +22,7 @@ interface DeckGLViewProps {
   waypoints: Waypoint[];
   messages: Record<string, any[]>;
   topicVisibility: Record<string, boolean>;
+  tfVisibility: Record<string, boolean>;
   onSendMessage?: (topic: string, type: string, data: any) => void;
   meshModels: Record<string, any>;
   onMeshModelsChange: (models: Record<string, any>) => void;
@@ -33,6 +34,7 @@ export function DeckGLView({
   waypoints, 
   messages, 
   topicVisibility, 
+  tfVisibility,
   onSendMessage,
   meshModels,
   onMeshModelsChange,
@@ -367,6 +369,13 @@ export function DeckGLView({
     }
 
     links.forEach(link => {
+      // 检查该 TF 坐标轴是否被隐藏
+      const isHidden = tfVisibility[link.child] !== undefined 
+        ? !tfVisibility[link.child] 
+        : (config?.tf?.hidden_frame || []).includes(link.child);
+
+      if (isHidden) return;
+
       const worldMat = getFrameMatrix(link.child, tfTree, fixedFrame);
       const parentMat = getFrameMatrix(link.parent, tfTree, fixedFrame);
       
