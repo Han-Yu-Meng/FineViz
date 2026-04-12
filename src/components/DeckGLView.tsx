@@ -687,9 +687,56 @@ export function DeckGLView({
 
     const robotLayers: any[] = [];
     if (urdfRobot && showRobotModel) {
+      // 1. 计算默认的树形层级位姿（当没有 TF 时使用）
+      const defaultWorldMatrices: Record<string, Matrix4> = {};
+      const baseFrame = config?.robot?.base_frame || Object.keys(urdfRobot.links)[0];
+
+      if (baseFrame && urdfRobot.links[baseFrame]) {
+        defaultWorldMatrices[baseFrame] = new Matrix4(); // 单位阵
+        console.log(`[URDF Debug] Base frame: ${baseFrame}`);
+        console.log(`[URDF Debug] Robot structure: links: ${Object.keys(urdfRobot.links).join(', ')}`);
+        console.log(`[URDF Debug] Robot structure: joints:`, urdfRobot.joints);
+
+        // 简单的广度优先或递归计算所有连杆相对于 base_frame 的位姿
+        const computeDefaultPose = (parentName: string) => {
+          Object.values(urdfRobot.joints).forEach(joint => {
+            const pName = String(joint.parent);
+            const cName = String(joint.child);
+            
+            if (pName === parentName && !defaultWorldMatrices[cName]) {
+              console.log(`[URDF Debug] FOUND JOINT: ${joint.name}, Parent: ${pName}, Child: ${cName}`);
+              
+              const r = joint.origin.rpy[0];
+              const p = joint.origin.rpy[1];
+              const y = joint.origin.rpy[2];
+              const q = new Quaternion().rotateX(r).rotateY(p).rotateZ(y);
+              
+              const localMat = new Matrix4()
+                .translate(joint.origin.xyz)
+                .multiplyRight(new Matrix4().fromQuaternion(q));
+              
+              defaultWorldMatrices[cName] = new Matrix4(defaultWorldMatrices[parentName]).multiplyRight(localMat);
+              computeDefaultPose(cName);
+            }
+          });
+        };
+        computeDefaultPose(baseFrame);
+        console.log(`[URDF Debug] Computed default matrices for: ${Object.keys(defaultWorldMatrices).join(', ')}`);
+      }
+
       Object.keys(urdfRobot.links).forEach(linkName => {
         const link = urdfRobot.links[linkName];
-        const matArray = worldMatrices[linkName] || worldMatrices[fixedFrame] || new Matrix4().toArray();
+        
+        // 优先使用实时的 worldMatrices (TF)，如果没有则使用基于 Joint 计算的默认位姿
+        let matArray;
+        if (worldMatrices[linkName]) {
+          matArray = worldMatrices[linkName];
+        } else if (defaultWorldMatrices[linkName]) {
+          matArray = defaultWorldMatrices[linkName].toArray();
+        } else {
+          matArray = worldMatrices[fixedFrame] || new Matrix4().toArray();
+        }
+
         if (!matArray) return;
         
         link.visuals.forEach((v, idx) => {

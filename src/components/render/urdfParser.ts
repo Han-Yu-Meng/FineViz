@@ -39,8 +39,11 @@ export interface URDFRobot {
   joints: Record<string, URDFJoint>;
 }
 
-function parseVector(str: string | undefined, defaultVal: [number, number, number] = [0, 0, 0]): [number, number, number] {
-  if (!str) return defaultVal;
+function parseVector(val: any, defaultVal: [number, number, number] = [0, 0, 0]): [number, number, number] {
+  if (val === undefined || val === null) return defaultVal;
+  const str = Array.isArray(val) ? val[0] : val;
+  if (typeof str !== 'string') return defaultVal;
+  
   const parts = str.trim().split(/\s+/).map(Number);
   return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
 }
@@ -49,7 +52,8 @@ export async function parseURDF(xmlText: string, urdfPath: string): Promise<URDF
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: "",
-    isArray: (name) => ["link", "joint", "visual"].includes(name)
+    // 强制将这些关键节点设为数组，防止单节点时解析为对象
+    isArray: (name) => ["link", "joint", "visual", "origin", "geometry", "mesh"].includes(name)
   });
   const result = parser.parse(xmlText);
   const robot = result.robot;
@@ -61,25 +65,29 @@ export async function parseURDF(xmlText: string, urdfPath: string): Promise<URDF
   (robot.link || []).forEach((l: any) => {
     const linkName = l.name;
     const visuals: URDFVisual[] = (l.visual || []).map((v: any) => {
-      const origin = v.origin ? {
-        xyz: parseVector(v.origin.xyz),
-        rpy: parseVector(v.origin.rpy)
+      // 这里的 v.origin 已经是数组
+      const o = v.origin?.[0];
+      const origin = o ? {
+        xyz: parseVector(o.xyz),
+        rpy: parseVector(o.rpy)
       } : { xyz: [0, 0, 0], rpy: [0, 0, 0] };
 
       const geometry: any = {};
-      if (v.geometry && v.geometry.mesh) {
-        let filename = v.geometry.mesh.filename;
-        // Resolve package://
-        if (filename.startsWith('package://')) {
-          // package://meshes/wheel_chair.dae -> meshes/wheel_chair.dae
-          filename = filename.replace('package://', '');
+      const g = v.geometry?.[0];
+      if (g) {
+        if (g.mesh) {
+          const m = g.mesh[0];
+          let filename = m.filename;
+          if (filename && filename.startsWith('package://')) {
+            filename = filename.replace('package://', '');
+          }
+          geometry.mesh = {
+            filename,
+            scale: parseVector(m.scale, [1, 1, 1])
+          };
+        } else if (g.box) {
+          geometry.box = { size: parseVector(g.box[0].size) };
         }
-        geometry.mesh = {
-          filename,
-          scale: parseVector(v.geometry.mesh.scale, [1, 1, 1])
-        };
-      } else if (v.geometry && v.geometry.box) {
-        geometry.box = { size: parseVector(v.geometry.box.size) };
       }
       return { origin, geometry };
     });
@@ -88,14 +96,25 @@ export async function parseURDF(xmlText: string, urdfPath: string): Promise<URDF
 
   (robot.joint || []).forEach((j: any) => {
     const jointName = j.name;
+    
+    const extractName = (node: any) => {
+      if (!node) return '';
+      const target = Array.isArray(node) ? node[0] : node;
+      return target.link || target;
+    };
+
+    const parent = extractName(j.parent);
+    const child = extractName(j.child);
+    const o = j.origin?.[0];
+    
     joints[jointName] = {
       name: jointName,
       type: j.type,
-      parent: j.parent.link,
-      child: j.child.link,
-      origin: j.origin ? {
-        xyz: parseVector(j.origin.xyz),
-        rpy: parseVector(j.origin.rpy)
+      parent: String(parent),
+      child: String(child),
+      origin: o ? {
+        xyz: parseVector(o.xyz),
+        rpy: parseVector(o.rpy)
       } : { xyz: [0, 0, 0], rpy: [0, 0, 0] }
     };
   });

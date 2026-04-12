@@ -8,20 +8,20 @@ visualize:
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: true
     last_time: 1
-    point_size: 1
+    point_size: 0.5
     color_field: "intensity"
     color_scheme: "turbo"
-    alpha: 0.8
+    alpha: 1.0
     
   global_map:
     topic: "/global_map"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: false
     last_time: 0
-    point_size: 1.5
+    point_size: 0.5
     color_field: "z"
     color_scheme: "warm"
-    alpha: 0.8
+    alpha: 1.0
   
   plan:
     topic: "/plan"
