@@ -92,3 +92,6 @@ tf:
       parent: "odom"
       position: [0.057, 0.083, 0.31]
       rotation: [0.0, 0.0, 0.0, 1.0]
+      
+robot:
+  urdf: "fins/fins.urdf"
