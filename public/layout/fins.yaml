@@ -77,7 +77,7 @@ chart:
 
   chart2:
     - topic: "/Odometry"
-      fields: ["linear.x", "angular.z"]
+      fields: ["twist.twist.linear.x", "twist.twist.angular.z"]
       colors: ["#E35D97", "#5DE35D"]
       
 tf: 
@@ -87,11 +87,11 @@ tf:
   axis_width: 0.05
   axis_label_visualize: true
   
-  fixed_transform:
-    lidar_odom:
-      parent: "odom"
-      position: [0.057, 0.083, 0.31]
-      rotation: [0.0, 0.0, 0.0, 1.0]
+  # fixed_transform:
+  #   lidar_odom:
+  #     parent: "odom"
+  #     position: [0.057, 0.083, 0.31]
+  #     rotation: [0.0, 0.0, 0.0, 1.0]
       
 robot:
   urdf: "fins/fins.urdf"
