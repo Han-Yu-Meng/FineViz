@@ -3,7 +3,7 @@
 
   <link name="base_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 -1.5708" />
+      <origin xyz="0 0 -0.05" rpy="0 0 -1.5708" />
       <geometry>
         <mesh filename="package://meshes/base_link.glb" />
       </geometry>
