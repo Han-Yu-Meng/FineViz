@@ -10,6 +10,7 @@ import { useFoxglove } from './hooks/useFoxglove';
 import { Sidebar } from './components/Sidebar';
 import { DeckGLView } from './components/DeckGLView';
 import { collectLayoutTopics } from './lib/layoutTopics';
+import { useGamepad } from './hooks/useGamepad';
 
 export default function App() {
   const [layoutPath, setLayoutPath] = useState<string>(() => {
@@ -78,6 +79,14 @@ export default function App() {
     });
   }, [config?.tf?.hidden_frame]);
 
+  const gamepadData = useGamepad(publish, {
+    maxLinearSpeed: 0.5,   // 根据你的机器人实际情况调整速度
+    maxAngularSpeed: 1.0,
+    publishRate: 50,       // 20Hz
+    deadzone: 0.15,        // Steam Deck 摇杆建议设置 0.1 以上防止漂移
+    enabled: true
+  });
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-600">
@@ -116,6 +125,7 @@ export default function App() {
               meshModels={meshModels}
               showRobotModel={showRobotModel}
               onToggleRobotModel={() => setShowRobotModel(!showRobotModel)}
+              gamepadData={gamepadData}
             />
           </div>
         </div>
@@ -141,6 +151,7 @@ export default function App() {
             meshModels={meshModels}
             showRobotModel={showRobotModel}
             onToggleRobotModel={() => setShowRobotModel(!showRobotModel)}
+            gamepadData={gamepadData}
           />
         </div>
 

@@ -34,7 +34,7 @@ interface DeckGLViewProps {
   showRobotModel: boolean;
 }
 
-export function DeckGLView({ 
+export const DeckGLView = React.memo(function DeckGLView({ 
   config, 
   waypoints, 
   messages, 
@@ -693,9 +693,9 @@ export function DeckGLView({
 
       if (baseFrame && urdfRobot.links[baseFrame]) {
         defaultWorldMatrices[baseFrame] = new Matrix4(); // 单位阵
-        console.log(`[URDF Debug] Base frame: ${baseFrame}`);
-        console.log(`[URDF Debug] Robot structure: links: ${Object.keys(urdfRobot.links).join(', ')}`);
-        console.log(`[URDF Debug] Robot structure: joints:`, urdfRobot.joints);
+        // console.log(`[URDF Debug] Base frame: ${baseFrame}`);
+        // console.log(`[URDF Debug] Robot structure: links: ${Object.keys(urdfRobot.links).join(', ')}`);
+        // console.log(`[URDF Debug] Robot structure: joints:`, urdfRobot.joints);
 
         // 简单的广度优先或递归计算所有连杆相对于 base_frame 的位姿
         const computeDefaultPose = (parentName: string) => {
@@ -704,7 +704,7 @@ export function DeckGLView({
             const cName = String(joint.child);
             
             if (pName === parentName && !defaultWorldMatrices[cName]) {
-              console.log(`[URDF Debug] FOUND JOINT: ${joint.name}, Parent: ${pName}, Child: ${cName}`);
+              // console.log(`[URDF Debug] FOUND JOINT: ${joint.name}, Parent: ${pName}, Child: ${cName}`);
               
               const r = joint.origin.rpy[0];
               const p = joint.origin.rpy[1];
@@ -721,7 +721,7 @@ export function DeckGLView({
           });
         };
         computeDefaultPose(baseFrame);
-        console.log(`[URDF Debug] Computed default matrices for: ${Object.keys(defaultWorldMatrices).join(', ')}`);
+        // console.log(`[URDF Debug] Computed default matrices for: ${Object.keys(defaultWorldMatrices).join(', ')}`);
       }
 
       Object.keys(urdfRobot.links).forEach(linkName => {
@@ -898,4 +898,12 @@ export function DeckGLView({
       </div>
     </div>
   );
-}
+}, (prev, next) => {
+  return prev.messages === next.messages && 
+         prev.topicVisibility === next.topicVisibility && 
+         prev.tfVisibility === next.tfVisibility && 
+         prev.showRobotModel === next.showRobotModel && 
+         prev.config === next.config &&
+         prev.waypoints === next.waypoints &&
+         prev.meshModels === next.meshModels;
+});

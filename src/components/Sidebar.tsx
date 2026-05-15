@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Info, Activity, ListTree, LineChart } from 'lucide-react';
+import { Info, Activity, ListTree, LineChart, Gamepad2 } from 'lucide-react';
 import { AppConfig, ConfigManifest } from '../hooks/useConfig';
 import { FrameStats, Topic } from '../hooks/useFoxglove';
 import { cn } from '../lib/utils';
@@ -7,6 +7,7 @@ import { InfoPanel } from './sidebar/InfoPanel';
 import { StreamsPanel } from './sidebar/StreamsPanel';
 import { TransformsPanel } from './sidebar/TransformsPanel';
 import { ChartsPanel } from './sidebar/ChartsPanel';
+import { GamepadPanel } from './sidebar/GamepadPanel';
 
 interface SidebarProps {
   config: AppConfig | null;
@@ -26,6 +27,14 @@ interface SidebarProps {
   meshModels?: Record<string, any>;
   showRobotModel: boolean;
   onToggleRobotModel: () => void;
+  gamepadData: {
+    gamepadConnected: boolean;
+    gamepadId: string;
+    v: { x: number; y: number; w: number };
+    axes: number[];
+    manualV: { x: number; y: number; w: number };
+    setManualV: React.Dispatch<React.SetStateAction<{ x: number; y: number; w: number }>>;
+  };
 }
 
 export function Sidebar({ 
@@ -45,7 +54,8 @@ export function Sidebar({
   manifest,
   meshModels,
   showRobotModel,
-  onToggleRobotModel
+  onToggleRobotModel,
+  gamepadData
 }: SidebarProps) {
   const [internalTab, setInternalTab] = useState<string>('info');
   
@@ -69,6 +79,9 @@ export function Sidebar({
         </TabButton>
         <TabButton active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} title="Charts">
           <LineChart size={20} />
+        </TabButton>
+        <TabButton active={activeTab === 'gamepad'} onClick={() => setActiveTab('gamepad')} title="Gamepad">
+          <Gamepad2 size={20} />
         </TabButton>
       </div>
       
@@ -105,6 +118,16 @@ export function Sidebar({
           />
         )}
         {activeTab === 'charts' && <ChartsPanel config={config} messages={messages} />}
+        {activeTab === 'gamepad' && (
+          <GamepadPanel 
+            gamepadConnected={gamepadData.gamepadConnected}
+            gamepadId={gamepadData.gamepadId}
+            v={gamepadData.v}
+            axes={gamepadData.axes}
+            manualV={gamepadData.manualV}
+            setManualV={gamepadData.setManualV}
+          />
+        )}
       </div>
     </div>
   );
