@@ -301,23 +301,27 @@ export function useFoxglove(url: string) {
       // 1. Check if we have a schema definition for this schemaName from existing topics
       const existingTopicWithSchema = topicsRef.current.find(t => t.schemaName === schemaName && t.schema);
       
+      // Fallback: If no schema is found, we might be the first to publish this type.
+      // For common types like Twist, we could provide a built-in schema, 
+      // but a better fix is ensuring the server provides it via another topic.
       if (!existingTopicWithSchema) {
-        console.warn(`Cannot advertise ${topicName}: No schema found for ${schemaName}.`);
+        console.warn(`Cannot advertise ${topicName}: No schema found for ${schemaName}. Ensure at least one topic of this type is being published or subscribed by the server.`);
         return;
       }
 
       // 2. Locally advertise to get a channel ID
-      channelId = nextClientChannelIdRef.current++;
-      clientAdvertisedChannelsRef.current.set(topicName, channelId);
-
-      // 3. Send 'advertise' operation to server
-      client.advertise({
-        id: channelId,
+      // Some versions of the SDK return the ID from advertise, others take it.
+      // We'll use our own tracking but let the SDK handle the protocol-level ID if needed.
+      const advId = client.advertise({
         topic: topicName,
-        encoding: "cdr",
         schemaName: schemaName,
-        schema: existingTopicWithSchema.schema
+        schema: existingTopicWithSchema.schema,
+        encoding: "cdr",
+        schemaEncoding: "ros2msg", 
       });
+
+      channelId = advId;
+      clientAdvertisedChannelsRef.current.set(topicName, channelId);
       
       console.log(`Advertised new channel: ${topicName} (ID: ${channelId}) with schema ${schemaName}`);
 
