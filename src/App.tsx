@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Map as MapIcon, Activity, ListTree, LineChart, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Map as MapIcon, Activity, ListTree, LineChart, Info, Gamepad2 } from 'lucide-react';
 import { useConfig } from './hooks/useConfig';
 import { useFoxglove } from './hooks/useFoxglove';
 import { Sidebar } from './components/Sidebar';
@@ -197,6 +197,9 @@ export default function App() {
         </button>
         <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'info' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('info')}>
           <Info size={24} />
+        </button>
+        <button className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors ${mobileTab === 'gamepad' ? 'text-blue-600' : 'text-slate-500'}`} onClick={() => setMobileTab('gamepad')}>
+          <Gamepad2 size={24} />
         </button>
       </div>
     </div>
