@@ -1,5 +1,6 @@
 [
   { "id": "wheelchair", "name": "智能轮椅回放", "path": "layout/wheelchair.yaml" },
   { "id": "wheelchair-real", "name": "智能轮椅实机", "path": "layout/wheelchair-real.yaml" },
-  { "id": "fins", "name": "Fins 小车", "path": "layout/fins.yaml" }
+  { "id": "fins", "name": "Fins 小车", "path": "layout/fins.yaml" },
+  { "id": "weineng", "name": "微能车", "path": "layout/weineng.yaml" }
 ]
