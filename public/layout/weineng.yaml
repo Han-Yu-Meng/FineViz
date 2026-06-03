@@ -35,6 +35,13 @@ visualize:
     topic: "/trajectories"
     type: "visualization_msgs/msg/MarkerArray"
     alpha: 0.8
+    
+  map:
+    topic: "/map"
+    type: "nav_msgs/msg/OccupancyGrid"
+    alpha: 0.5
+    color_scheme: "gray"
+    draw_behind: true
  
 service:
   Startup:
