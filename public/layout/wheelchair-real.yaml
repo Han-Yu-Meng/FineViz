@@ -35,21 +35,33 @@ visualize:
     topic: "/trajectories"
     type: "visualization_msgs/msg/MarkerArray"
     alpha: 0.8
+    
+  map:
+    topic: "/map"
+    type: "nav_msgs/msg/OccupancyGrid"
+    alpha: 0.5
+    color_scheme: "gray"
+    draw_behind: true
  
 service:
   Startup:
-    topic: "/wheelchair/startup"
-    type: "std_srvs/srv/Trigger"
+    port: "4000"
+    url: "/navigation/start"
+    method: "POST"
     icon: "Power"
     
   Shutdown:
-    topic: "/wheelchair/shutdown"
-    type: "std_srvs/srv/Trigger"
-    icon: "PowerOff" 
+    port: "4000"
+    url: "/navigation/stop"
+    method: "POST"
+    icon: "PowerOff"
    
   SetSpeed:
-    topic: "/wheelchair/set_speed"
-    type: "wheelchair_msgs/srv/SetSpeed"
+    port: "4000"
+    url: "/navigation/set_speed"
+    method: "POST"
+    payload:
+      - speed: 0.5
     icon: "Gauge"
     
 chart:
