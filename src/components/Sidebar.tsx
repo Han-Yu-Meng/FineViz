@@ -32,6 +32,8 @@ interface SidebarProps {
     gamepadId: string;
     v: { x: number; y: number; w: number };
     axes: number[];
+    controlMode: any; // Using any for simplicity or I can import ControlMode
+    setControlMode: (mode: any) => void;
     manualV: { x: number; y: number; w: number };
     setManualV: React.Dispatch<React.SetStateAction<{ x: number; y: number; w: number }>>;
   };
@@ -124,6 +126,8 @@ export function Sidebar({
             gamepadId={gamepadData.gamepadId}
             v={gamepadData.v}
             axes={gamepadData.axes}
+            controlMode={gamepadData.controlMode}
+            setControlMode={gamepadData.setControlMode}
             manualV={gamepadData.manualV}
             setManualV={gamepadData.setManualV}
           />

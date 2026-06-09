@@ -84,3 +84,9 @@ tf:
 robot:
   urdf: "wheelchair/wheelchair.urdf"
   # urdf: "fins/fins.urdf"
+
+control:
+  max_linear_speed: 0.5
+  max_angular_speed: 1.0
+  max_pose_range: 2.0
+  publish_rate: 50

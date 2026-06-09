@@ -80,10 +80,11 @@ export default function App() {
   }, [config?.tf?.hidden_frame]);
 
   const gamepadData = useGamepad(publish, {
-    maxLinearSpeed: 0.5,   // 根据你的机器人实际情况调整速度
-    maxAngularSpeed: 1.0,
-    publishRate: 50,       // 20Hz
-    deadzone: 0.15,        // Steam Deck 摇杆建议设置 0.1 以上防止漂移
+    maxLinearSpeed: config?.control?.max_linear_speed ?? 0.5,
+    maxAngularSpeed: config?.control?.max_angular_speed ?? 1.0,
+    maxPoseRange: config?.control?.max_pose_range ?? 2.0,
+    publishRate: config?.control?.publish_rate ?? 50,
+    deadzone: 0.15,
     enabled: true
   });
 

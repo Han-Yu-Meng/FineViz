@@ -10,6 +10,12 @@ export interface AppConfig {
   service: Record<string, any>;
   chart: Record<string, any>;
   tf: Record<string, any>;
+  control?: {
+    max_linear_speed?: number;
+    max_angular_speed?: number;
+    max_pose_range?: number;
+    publish_rate?: number;
+  };
   robot?: {
     urdf?: string;
   };
