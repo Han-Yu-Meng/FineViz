@@ -989,10 +989,15 @@ export const DeckGLView = React.memo(function DeckGLView({
         getTextSize: (f: any) => (f.properties?.id === hoveredStationId ? 18 : 14),
         getTextColor: (f: any) => (f.properties?.id === hoveredStationId ? [37, 99, 235] : [30, 41, 59]),
         getTextAnchor: 'middle',
-        getTextAlignmentBaseline: 'top',
-        getTextPixelOffset: [0, 10],
+        getTextAlignmentBaseline: 'bottom',
+        getTextPixelOffset: [0, -20],
         getTextBackgroundColor: [255, 255, 255, 220],
         textBackgroundPadding: [4, 2],
+        _subLayerProps: {
+          text: {
+            fontWeight: 'bold'
+          }
+        },
         onHover: (info: any) => {
           if (info.object && info.object.geometry?.type === 'Point') {
             setHoveredStationId(info.object.properties?.id ?? null);
