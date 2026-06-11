@@ -43,6 +43,10 @@ visualize:
     alpha: 0.5
     color_scheme: "gray"
     draw_behind: true
+
+  geojson:
+    topic: "/geojson"
+    type: "std_msgs/String"
  
 service:
   Navigation:

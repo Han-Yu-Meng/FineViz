@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import DeckGL from '@deck.gl/react';
 import { OrbitView } from '@deck.gl/core';
-import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer, BitmapLayer } from '@deck.gl/layers';
+import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer, BitmapLayer, GeoJsonLayer } from '@deck.gl/layers';
+import { TripsLayer } from '@deck.gl/geo-layers';
 import { AppConfig, Waypoint } from '../hooks/useConfig';
 import { Matrix4, Quaternion } from '@math.gl/core';
 
@@ -61,6 +62,25 @@ export const DeckGLView = React.memo(function DeckGLView({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followOffset, setFollowOffset] = useState<[number, number, number]>([0, 0, 0]);
+
+  // GeoJSON state
+  const [geojsonData, setGeojsonData] = useState<any>(null);
+  const [hoveredStationId, setHoveredStationId] = useState<number | string | null>(null);
+  const [confirmStation, setConfirmStation] = useState<any>(null);
+  const lastGeoJsonRef = useRef<string>('');
+
+  // TripsLayer animation time
+  const [currentTime, setCurrentTime] = useState(0);
+  useEffect(() => {
+    if (!geojsonData) return;
+    let animationId: number;
+    const animate = () => {
+      setCurrentTime(t => (t + 0.8) % 100);
+      animationId = requestAnimationFrame(animate);
+    };
+    animationId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationId);
+  }, [geojsonData]);
 
   // Goal pose state
   const [isSettingGoal, setIsSettingGoal] = useState(false);
@@ -216,6 +236,27 @@ export const DeckGLView = React.memo(function DeckGLView({
       if (res) nextGrids[c.topic] = res;
     }
     setGridData(nextGrids);
+
+    // --- Update GeoJSON from ROS topic ---
+    const geojsonConfig = Object.values(cfg.visualize || {}).find((item: any) => item?.topic === '/geojson');
+    if (geojsonConfig) {
+      const m = msgs[geojsonConfig.topic] || [];
+      if (m.length > 0) {
+        const latest = m[m.length - 1];
+        const jsonStr = latest.data?.data;
+        if (jsonStr && typeof jsonStr === 'string' && jsonStr !== lastGeoJsonRef.current) {
+          lastGeoJsonRef.current = jsonStr;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed && parsed.type === 'FeatureCollection') {
+              setGeojsonData(parsed);
+            }
+          } catch {
+            console.warn('[GeoJSON] Failed to parse JSON from topic');
+          }
+        }
+      }
+    }
 
     // --- Update TF Tree ---
     const rawTf = [...(msgs['/tf'] || []), ...(msgs['/tf_static'] || [])];
@@ -586,6 +627,81 @@ export const DeckGLView = React.memo(function DeckGLView({
     }
   }, [isSettingGoal, goalPosition, goalYaw, fixedFrame, onSendMessage]);
 
+  // Compute tangent yaw for a station by searching connecting LineStrings
+  const computeStationYaw = useCallback((feature: any): number => {
+    const coords = feature.geometry.coordinates;
+    if (!geojsonData) return 0;
+
+    const lineStrings = geojsonData.features.filter((f: any) => f.geometry.type === 'LineString');
+    for (const ls of lineStrings) {
+      const lineCoords = ls.geometry.coordinates;
+      const idx = lineCoords.findIndex(
+        (c: any) => Math.abs(c[0] - coords[0]) < 1e-4 && Math.abs(c[1] - coords[1]) < 1e-4
+      );
+      if (idx !== -1) {
+        if (idx < lineCoords.length - 1) {
+          const nextPoint = lineCoords[idx + 1];
+          return Math.atan2(nextPoint[1] - coords[1], nextPoint[0] - coords[0]);
+        } else if (idx > 0) {
+          const prevPoint = lineCoords[idx - 1];
+          return Math.atan2(coords[1] - prevPoint[1], coords[0] - prevPoint[0]);
+        }
+        break;
+      }
+    }
+    return 0;
+  }, [geojsonData]);
+
+  // Handle station click — show confirmation dialog
+  const handleStationClick = useCallback((feature: any) => {
+    if (feature && feature.geometry?.type === 'Point') {
+      setConfirmStation(feature);
+    }
+  }, []);
+
+  // Confirm and send goal pose
+  const confirmSendGoal = useCallback(() => {
+    if (!confirmStation) return;
+    const coords = confirmStation.geometry.coordinates;
+    const yaw = computeStationYaw(confirmStation);
+    const qz = Math.sin(yaw / 2);
+    const qw = Math.cos(yaw / 2);
+
+    const poseData = {
+      header: {
+        frame_id: fixedFrame,
+        stamp: { sec: Math.floor(Date.now() / 1000), nanosec: (Date.now() % 1000) * 1000000 }
+      },
+      pose: {
+        position: { x: coords[0], y: coords[1], z: coords[2] || 0 },
+        orientation: { x: 0, y: 0, z: qz, w: qw }
+      }
+    };
+
+    onSendMessage?.('/goal_pose', 'geometry_msgs/msg/PoseStamped', poseData);
+    setConfirmStation(null);
+  }, [confirmStation, computeStationYaw, fixedFrame, onSendMessage]);
+
+  // Preprocess GeoJSON LineStrings into TripsLayer data format
+  const tripsData = useMemo(() => {
+    if (!geojsonData) return [];
+    const lineStrings = geojsonData.features.filter(
+      (f: any) => f.geometry.type === 'LineString'
+    );
+    return lineStrings.map((feature: any, index: number) => {
+      const coordinates = feature.geometry.coordinates;
+      const count = coordinates.length;
+      // Virtual timestamps from 0→100 along the path direction
+      const timestamps = coordinates.map((_: any, i: number) => (i / (count - 1)) * 100);
+      return {
+        id: feature.properties?.id || index,
+        path: coordinates,
+        timestamps,
+        color: feature.properties?.color || [99, 102, 241],
+      };
+    });
+  }, [geojsonData]);
+
   const layers = useMemo(() => {
     const allGridLayers = Object.entries(gridData).map(([t, d]) => {
       if (!d || d.width <= 0 || d.height <= 0) return null;
@@ -682,7 +798,8 @@ export const DeckGLView = React.memo(function DeckGLView({
           }
           return subLayers;
         });
-      })
+      }),
+      // --- GeoJSON Topological Map (via GeoJsonLayer) ---
     ];
 
     const robotLayers: any[] = [];
@@ -832,9 +949,73 @@ export const DeckGLView = React.memo(function DeckGLView({
       ...normalGrids,
       ...robotLayers,
       ...tfLayers,
-      ...goalLayer
+      ...goalLayer,
+      // --- Directional Flow Animation (TripsLayer) ---
+      new TripsLayer({
+        id: 'topo-flow',
+        data: tripsData,
+        getPath: (d: any) => d.path,
+        getTimestamps: (d: any) => d.timestamps,
+        getColor: (d: any) => d.color,
+        opacity: 0.8,
+        widthUnits: 'meters',       // 保持米
+        getWidth: 0.1,              // 将物理宽度缩小为 0.1 米 (10 厘米)
+        widthMinPixels: 2,          // 缩小到极限时至少保留 2 像素防止看不见
+        rounded: true,
+        trailLength: 30,
+        currentTime,
+        shadowEnabled: false,
+      }),
+      // --- GeoJSON Topological Map (stations on top of flow) ---
+      new GeoJsonLayer({
+        id: 'geojson-topological',
+        data: geojsonData,
+        pickable: true,
+        stroked: true,
+        filled: true,
+        pointType: 'circle+text',
+        // 🛠️ 轨道线条样式修改：
+        lineWidthUnits: 'meters',          // 改为米为单位
+        getLineWidth: 0.12,                // 轨道物理宽度设为 12 厘米
+        lineWidthMinPixels: 1,             // 缩小到极限时至少保留 1 像素防止消失
+        // Line styling
+        getLineColor: [180, 198, 252, 120],
+        // Point styling
+        getPointRadius: (f: any) => (f.properties?.id === hoveredStationId ? 8 : 5),
+        pointRadiusUnits: 'pixels',
+        getFillColor: (f: any) => (f.properties?.id === hoveredStationId ? [59, 130, 246] : [255, 255, 255]),
+        // Text styling
+        getText: (f: any) => f.properties?.frame || f.properties?.id?.toString() || '',
+        getTextSize: (f: any) => (f.properties?.id === hoveredStationId ? 18 : 14),
+        getTextColor: (f: any) => (f.properties?.id === hoveredStationId ? [37, 99, 235] : [30, 41, 59]),
+        getTextAnchor: 'middle',
+        getTextAlignmentBaseline: 'top',
+        getTextPixelOffset: [0, 10],
+        getTextBackgroundColor: [255, 255, 255, 220],
+        textBackgroundPadding: [4, 2],
+        onHover: (info: any) => {
+          if (info.object && info.object.geometry?.type === 'Point') {
+            setHoveredStationId(info.object.properties?.id ?? null);
+          } else {
+            setHoveredStationId(null);
+          }
+        },
+        onClick: (info: any) => {
+          if (info.object && info.object.geometry?.type === 'Point') {
+            handleStationClick(info.object);
+          }
+        },
+        updateTriggers: {
+          data: [geojsonData],
+          getPointRadius: [hoveredStationId],
+          getFillColor: [hoveredStationId],
+          getTextSize: [hoveredStationId],
+          getTextColor: [hoveredStationId],
+        },
+        parameters: { depthTest: true },
+      }),
     ].filter(Boolean);
-  }, [pointCloudData, pathData, markerData, gridData, tfLayers, worldMatrices, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal, urdfRobot, meshModels, showRobotModel]);
+  }, [pointCloudData, pathData, markerData, gridData, tfLayers, worldMatrices, fixedFrame, config?.visualize, goalPosition, goalYaw, isSettingGoal, urdfRobot, meshModels, showRobotModel, geojsonData, hoveredStationId, handleStationClick, tripsData, currentTime]);
 
   return (
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
@@ -856,6 +1037,7 @@ export const DeckGLView = React.memo(function DeckGLView({
         onDrag={onDrag}
         onDragEnd={onDragEnd}
         onAfterRender={onAfterRender}
+        getCursor={({ isHovering }: any) => (isHovering ? 'pointer' : 'grab')}
         layers={layers}
       />
       
@@ -896,6 +1078,49 @@ export const DeckGLView = React.memo(function DeckGLView({
           {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
         </button>
       </div>
+
+      {/* Confirmation Dialog for GeoJSON Station Click */}
+      {confirmStation && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4 animate-in fade-in zoom-in">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <MapPin size={20} className="text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Navigate to Station</h3>
+                <p className="text-sm text-slate-500 font-mono">
+                  {confirmStation.properties?.frame || `ID: ${confirmStation.properties?.id}`}
+                </p>
+              </div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 mb-4 text-sm text-slate-600 space-y-1">
+              <div className="flex justify-between">
+                <span>Position X</span>
+                <span className="font-mono">{confirmStation.geometry.coordinates[0]?.toFixed(3)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Position Y</span>
+                <span className="font-mono">{confirmStation.geometry.coordinates[1]?.toFixed(3)}</span>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmStation(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSendGoal}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }, (prev, next) => {

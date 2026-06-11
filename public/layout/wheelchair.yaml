@@ -35,6 +35,10 @@ visualize:
     topic: "/trajectories"
     type: "visualization_msgs/msg/MarkerArray"
     alpha: 0.8
+    
+  geojson:
+    topic: "/geojson"
+    type: "std_msgs/String"
  
 service:
   Startup:
