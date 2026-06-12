@@ -1,5 +1,5 @@
 import React from 'react';
-import { Gamepad2, Cpu, Activity, MousePointer2, Settings2 } from 'lucide-react';
+import { Gamepad2, Cpu, Activity, MousePointer2, Settings2, AlertTriangle } from 'lucide-react';
 import { Joystick } from '../ui/Joystick';
 
 interface GamepadPanelProps {
@@ -9,6 +9,8 @@ interface GamepadPanelProps {
   axes: number[];
   controlMode: 'velocity' | 'target_pose';
   setControlMode: (mode: 'velocity' | 'target_pose') => void;
+  eStop: boolean;
+  setEStop: (val: boolean) => void;
   manualV: { x: number; y: number; w: number };
   setManualV: React.Dispatch<React.SetStateAction<{ x: number; y: number; w: number }>>;
 }
@@ -20,6 +22,8 @@ export function GamepadPanel({
   axes,
   controlMode,
   setControlMode,
+  eStop,
+  setEStop,
   manualV,
   setManualV
 }: GamepadPanelProps) {
@@ -27,14 +31,6 @@ export function GamepadPanel({
     <div className="flex flex-col h-full overflow-hidden">
       <div className="p-4 text-sm text-slate-700 space-y-6 flex-shrink-0">
         <div className="space-y-4">
-          <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            {gamepadConnected ? (
-              <Gamepad2 size={18} className="text-blue-600" />
-            ) : (
-              <MousePointer2 size={18} className="text-blue-600" />
-            )}
-            {gamepadConnected ? 'Gamepad Status' : 'Virtual Joystick'}
-          </h3>
           
           <div className="bg-slate-50 rounded-lg p-3 border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
@@ -59,10 +55,6 @@ export function GamepadPanel({
         </div>
 
         <div className="space-y-4">
-          <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <Settings2 size={18} className="text-blue-600" />
-            Control Mode
-          </h3>
           <div className="flex bg-slate-100 p-1 rounded-lg">
             <button
               onClick={() => setControlMode('velocity')}
@@ -85,18 +77,23 @@ export function GamepadPanel({
               /target_pose
             </button>
           </div>
-          <div className="text-[10px] text-slate-400 px-1">
-            {controlMode === 'velocity' 
-              ? 'Publishing geometry_msgs/Twist for velocity control.' 
-              : 'Publishing geometry_msgs/PoseStamped for goal control.'}
-          </div>
+        </div>
+
+        {/* 急停模式 */}
+        <div className="space-y-4">
+          <button
+            onClick={() => setEStop(!eStop)}
+            className={`w-full py-3 px-4 rounded-lg font-bold text-sm transition-all duration-200 ${
+              eStop
+                ? 'bg-red-600 text-white shadow-lg shadow-red-200 animate-pulse'
+                : 'bg-white text-red-600 border-2 border-red-400 hover:bg-red-50 hover:border-red-500'
+            }`}
+          >
+            {eStop ? '⚠ E-STOP ACTIVE — RELEASE' : 'E-STOP'}
+          </button>
         </div>
 
         <div className="space-y-4">
-          <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <Activity size={18} className="text-blue-600" />
-            {controlMode === 'velocity' ? 'Velocity Output' : 'Target Pose Output'}
-          </h3>
           <div className="grid grid-cols-3 gap-2">
             <VelocityCard 
               label={controlMode === 'velocity' ? "VX" : "X"} 
@@ -123,24 +120,24 @@ export function GamepadPanel({
       {/* Visual Joysticks Area - Full screen height for mobile layout */}
       <div className="flex-1 relative bg-slate-50/50 m-2 rounded-2xl border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-around px-4 min-h-[300px] touch-none select-none overflow-x-hidden">
         <div className={`flex flex-col items-center justify-center w-1/2 h-full transition-opacity duration-300 ${controlMode === 'target_pose' ? 'opacity-30' : 'opacity-100'}`}>
-          <Joystick 
+          <Joystick
             label="Angular (Left)"
             axis="x"
             size={140}
             stickSize={48}
-            disabled={gamepadConnected || controlMode === 'target_pose'}
+            disabled={eStop || gamepadConnected || controlMode === 'target_pose'}
             value={{ x: gamepadConnected ? (axes[0] || 0) : -manualV.w, y: 0 }}
             onMove={(data) => setManualV(prev => ({ ...prev, w: -data.x }))}
             onEnd={() => setManualV(prev => ({ ...prev, w: 0 }))}
           />
         </div>
         <div className="flex flex-col items-center justify-center w-1/2 h-full">
-          <Joystick 
+          <Joystick
             label={controlMode === 'velocity' ? "Linear (Right)" : "Target (Right)"}
             size={140}
             stickSize={48}
-            disabled={gamepadConnected}
-            value={{ 
+            disabled={eStop || gamepadConnected}
+            value={{
               x: gamepadConnected ? (axes[2] || 0) : -manualV.y, 
               y: gamepadConnected ? (axes[3] || 0) : -manualV.x 
             }}

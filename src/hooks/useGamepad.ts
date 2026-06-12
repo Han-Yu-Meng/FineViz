@@ -25,10 +25,17 @@ export function useGamepad(
   const [controlMode, setControlMode] = useState<ControlMode>('velocity');
   const controlModeRef = useRef<ControlMode>('velocity');
 
+  const [eStop, setEStop] = useState(false);
+  const eStopRef = useRef(false);
+
   // 同步 Ref，确保 updateLoop 能读到最新值
   useEffect(() => {
     controlModeRef.current = controlMode;
   }, [controlMode]);
+
+  useEffect(() => {
+    eStopRef.current = eStop;
+  }, [eStop]);
 
   const [gamepadInfo, setGamepadInfo] = useState<{
     connected: boolean, 
@@ -127,6 +134,18 @@ export function useGamepad(
 
     // 3. 发布逻辑控制
     if (settings.enabled && now - lastPubTimeRef.current > settings.publishRate) {
+      // 急停模式：持续发送零速度，忽略所有输入
+      if (eStopRef.current) {
+        publish('/cmd_vel', 'geometry_msgs/msg/Twist', {
+          linear: { x: 0, y: 0, z: 0 },
+          angular: { x: 0, y: 0, z: 0 }
+        });
+        isStoppedRef.current = true;
+        lastPubTimeRef.current = now;
+        requestRef.current = requestAnimationFrame(updateLoop);
+        return;
+      }
+
       const hasInput = vx !== 0 || vy !== 0 || w !== 0;
       const currentMode = controlModeRef.current;
 
@@ -141,7 +160,7 @@ export function useGamepad(
           // 将 w (yaw) 转换为四元数
           const cy = Math.cos(w * 0.5);
           const sy = Math.sin(w * 0.5);
-          
+
           publish('/target_pose', 'geometry_msgs/msg/PoseStamped', {
             header: {
               stamp: { sec: Math.floor(now / 1000), nanosec: (now % 1000) * 1000000 },
@@ -187,12 +206,14 @@ export function useGamepad(
     };
   }, [publish, settings.enabled]); // 移除了对 manualV 的依赖，循环现在是完全独立的
 
-  return { 
-    gamepadConnected: gamepadInfo.connected, 
+  return {
+    gamepadConnected: gamepadInfo.connected,
     gamepadId: gamepadInfo.id,
     axes: gamepadInfo.axes,
     controlMode,
     setControlMode,
+    eStop,
+    setEStop,
     v: gamepadInfo.connected ? gamepadInfo.v : {
       x: manualVRef.current.x * (controlMode === 'velocity' ? settings.maxLinearSpeed : settings.maxPoseRange),
       y: manualVRef.current.y * (controlMode === 'velocity' ? settings.maxLinearSpeed : settings.maxPoseRange),
