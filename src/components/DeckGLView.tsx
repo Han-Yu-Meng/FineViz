@@ -90,6 +90,17 @@ export const DeckGLView = React.memo(function DeckGLView({
   const isInteractingRef = useRef(false);
   const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // OccupancyGrid 去重缓存：记录每个 topic 的上次解码时间戳和结果
+  const lastGridStampRef = useRef<Record<string, { sec: number; nsec: number }>>({});
+  const gridCacheRef = useRef<Record<string, OccupancyGridData>>({});
+
+  // 移动端限制最大 DPR 为 1.5，兼顾清晰度与显存（DPR=3 → 9倍像素，DPR=1.5 → 2.25倍）
+  const dpr = useMemo(() => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    // return isMobile ? Math.min(window.devicePixelRatio || 1, 1.5) : true;
+    return true;
+  }, []);
+
   useEffect(() => {
     const onFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -132,7 +143,7 @@ export const DeckGLView = React.memo(function DeckGLView({
       const sel = c.listen_updates ? (c.last_time > 0 ? m.filter((msg: any) => (msg.receivedAt || 0) >= now - c.last_time * 1000) : [m[m.length - 1]]) : [m[m.length - 1]];
       
       const res = sel.map(s => {
-        const decoded = decodePointCloud(s.data, c.color_field, c.color_scheme, 100000);
+        const decoded = decodePointCloud(s.data, c.color_field, c.color_scheme, 100000, 100000);
         if (decoded && decoded.frameId.startsWith('/')) {
           decoded.frameId = decoded.frameId.substring(1);
         }
@@ -225,17 +236,34 @@ export const DeckGLView = React.memo(function DeckGLView({
 
     // --- Update Occupancy Grids ---
     const gridConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'nav_msgs/msg/OccupancyGrid' && item?.topic);
-    const nextGrids: Record<string, OccupancyGridData> = {};
+    let gridChanged = false;
     for (const c of gridConfigs as any[]) {
       if (!(vis[c.topic] ?? true)) continue;
       const m = msgs[c.topic] || [];
       if (m.length === 0) continue;
       const latestMsg = m[m.length - 1];
-      
-      const res = decodeOccupancyGrid(latestMsg.data);
-      if (res) nextGrids[c.topic] = res;
+      const stamp = latestMsg.data?.header?.stamp;
+
+      // 时间戳去重：stamp 相同则跳过解码，复用缓存
+      if (stamp) {
+        const prev = lastGridStampRef.current[c.topic];
+        if (prev && prev.sec === stamp.sec && prev.nsec === stamp.nsec) {
+          continue;
+        }
+        lastGridStampRef.current[c.topic] = { sec: stamp.sec, nsec: stamp.nsec };
+      }
+
+      const cached = gridCacheRef.current[c.topic];
+      const res = decodeOccupancyGrid(latestMsg.data, cached);
+      if (res) {
+        gridCacheRef.current[c.topic] = res;
+        gridChanged = true;
+      }
     }
-    setGridData(nextGrids);
+    // 仅当有新数据解码时才触发 React 状态更新
+    if (gridChanged) {
+      setGridData({ ...gridCacheRef.current });
+    }
 
     // --- Update GeoJSON from ROS topic ---
     const geojsonConfig = Object.values(cfg.visualize || {}).find((item: any) => item?.topic === '/geojson');
@@ -1026,8 +1054,8 @@ export const DeckGLView = React.memo(function DeckGLView({
     <div className="relative w-full h-full bg-slate-100" onContextMenu={e => e.preventDefault()}>
       <DeckGL
         views={new OrbitView({ id: 'orbit' })}
-        // ✅ 保命手段 1：移动端关闭物理像素高清渲染，大幅降低 GPU 压力防止崩溃
-        useDevicePixels={/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? true : true}
+        // ✅ 保命手段 1：移动端限制 DPR 防止显存爆炸
+        useDevicePixels={dpr}
         controller={{
           dragMode: isSettingGoal ? 'rotate' : 'pan',
           dragPan: !isSettingGoal,

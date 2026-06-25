@@ -6,21 +6,21 @@ visualize:
     topic: "/cloud_registered"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: true
-    last_time: 1
+    last_time: 0.5
     point_size: 0.5
     color_field: "intensity"
     color_scheme: "turbo"
     alpha: 1.0
     
-  global_map:
-    topic: "/global_map_viz"
-    type: "sensor_msgs/msg/PointCloud2"
-    listen_updates: false
-    last_time: 0
-    point_size: 0.5
-    color_field: "z"
-    color_scheme: "warm"
-    alpha: 1.0
+  # global_map:
+  #   topic: "/global_map_viz"
+  #   type: "sensor_msgs/msg/PointCloud2"
+  #   listen_updates: false
+  #   last_time: 0
+  #   point_size: 0.5
+  #   color_field: "z"
+  #   color_scheme: "warm"
+  #   alpha: 1.0
   
   plan:
     topic: "/plan"
@@ -39,12 +39,12 @@ visualize:
     topic: "/geojson"
     type: "std_msgs/String"
 
-  # map:  TODO: 消耗资源太多，需要优化
-  #   topic: "/map"
-  #   type: "nav_msgs/msg/OccupancyGrid"
-  #   alpha: 0.5
-  #   color_scheme: "gray"
-  #   draw_behind: true
+  map:  #TODO: 消耗资源太多，需要优化
+    topic: "/map"
+    type: "nav_msgs/msg/OccupancyGrid"
+    alpha: 0.5
+    color_scheme: "gray"
+    draw_behind: true
 
  
 service:
