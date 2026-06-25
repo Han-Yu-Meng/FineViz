@@ -22,7 +22,7 @@ export default function App() {
     localStorage.setItem('fineviz-layout-path', layoutPath);
   }, [layoutPath]);
 
-  const { connected, topics, subscribe, messages, messageStats, publish } = useFoxglove(config?.info?.server || '');
+  const { connected, topics, subscribe, messages, messageStats, publish } = useFoxglove(`ws://${window.location.hostname}:8765`);
   const layoutTopics = useMemo(() => collectLayoutTopics(config), [config]);
   const layoutTopicNames = useMemo(() => layoutTopics.map((t) => t.name), [layoutTopics]);
   const [topicVisibility, setTopicVisibility] = useState<Record<string, boolean>>({});

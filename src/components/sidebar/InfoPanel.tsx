@@ -163,7 +163,7 @@ export function InfoPanel({
               className={`shrink-0 w-2 h-2 rounded-full ${connected ? 'bg-blue-500 animate-pulse' : 'bg-rose-500'}`} 
               title={connected ? 'Connected' : 'Offline'}
             />
-            <span className="truncate">{config.info.server}</span>
+            <span className="truncate">{`ws://${window.location.hostname}:8765`}</span>
           </div>
         </div>
       </div>

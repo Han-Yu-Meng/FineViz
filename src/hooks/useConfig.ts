@@ -3,8 +3,7 @@ import YAML from 'yaml';
 
 export interface AppConfig {
   info: {
-    server: string;
-    api_server: string;
+    api_port?: string;
   };
   visualize: Record<string, any>;
   service: Record<string, any>;
