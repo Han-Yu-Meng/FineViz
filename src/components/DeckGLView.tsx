@@ -47,7 +47,13 @@ export const DeckGLView = React.memo(function DeckGLView({
   showRobotModel
 }: DeckGLViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
-  const [viewState, setViewState] = useState<{ target: [number, number, number], zoom: number, rotationX: number, rotationOrbit: number }>({ target: [0, 0, 0], zoom: 6, rotationX: 30, rotationOrbit: 0 });
+  
+  const [viewState, setViewState] = useState<{ target: [number, number, number], zoom: number, rotationX: number, rotationOrbit: number }>({ 
+    target: [0, 0, 0], 
+    zoom: 3.5, 
+    rotationX: 30, 
+    rotationOrbit: 90 
+  });
   const [renderFps, setRenderFps] = useState(0);
 
   const [worldMatrices, setWorldMatrices] = useState<Record<string, number[]>>({});
@@ -60,7 +66,7 @@ export const DeckGLView = React.memo(function DeckGLView({
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(true);
   const [followOffset, setFollowOffset] = useState<[number, number, number]>([0, 0, 0]);
 
   // GeoJSON state
