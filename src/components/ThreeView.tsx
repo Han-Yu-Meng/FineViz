@@ -14,7 +14,7 @@ import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
 import { parseURDF, URDFRobot } from './render/urdfParser';
 import { loadGLB } from './render/meshLoader';
-import { AppConfig, Waypoint } from '../hooks/useConfig';
+import { AppConfig } from '../hooks/useConfig';
 
 // ── 全局共享缓冲池 ──
 const MAX_COMBINED_POINTS = 500000;
@@ -170,7 +170,6 @@ function rgbaToCanvas(raw: OccupancyGridRaw): HTMLCanvasElement {
 
 interface ThreeViewProps {
   config: AppConfig | null;
-  waypoints: Waypoint[];
   messages: Record<string, any[]>;
   topicVisibility: Record<string, boolean>;
   tfVisibility: Record<string, boolean>;
@@ -182,7 +181,6 @@ interface ThreeViewProps {
 
 export const DeckGLView = React.memo(function ThreeView({
   config,
-  waypoints,
   messages,
   topicVisibility,
   tfVisibility,
@@ -194,17 +192,22 @@ export const DeckGLView = React.memo(function ThreeView({
   const fixedFrame = config?.tf?.fixed_frame || 'map';
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
-  const [renderFps, setRenderFps] = useState(0);
+  const renderFpsRef = useRef(0);
+  const fpsDisplayRef = useRef<HTMLDivElement>(null);
 
   const [worldMatrices, setWorldMatrices] = useState<Record<string, number[]>>({});
   const worldMatricesRef = useRef<Record<string, number[]>>({});
 
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
+  const pointCloudDataRef = useRef<Record<string, PointCloudBinary>>({});
   const [pathData, setPathData] = useState<Record<string, any>>({});
   const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
   const [gridData, setGridData] = useState<Record<string, OccupancyGridData>>({});
   const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
+
+  // 同步 ref 供动画循环读取，避免依赖 state 触发 effect 重启
+  useEffect(() => { pointCloudDataRef.current = pointCloudData; }, [pointCloudData]);
 
   const [geojsonData, setGeojsonData] = useState<any>(null);
   const [hoveredStationId, setHoveredStationId] = useState<number | string | null>(null);
@@ -216,7 +219,7 @@ export const DeckGLView = React.memo(function ThreeView({
   const [goalYaw, setGoalYaw] = useState<number>(0);
 
   const isInteractingRef = useRef(false);
-  const followOffsetRef = useRef<[number, number, number]>([0, 0, 0]);
+  const followOffsetRef = useRef<[number, number, number, number]>([0, 0, 0, 0]);
   const isUserInteractingRef = useRef(false);
   const lastGridStampRef = useRef<Record<string, { sec: number; nsec: number }>>({});
   const gridCacheRef = useRef<Record<string, OccupancyGridData>>({});
@@ -357,6 +360,7 @@ export const DeckGLView = React.memo(function ThreeView({
         followOffsetRef.current = [
           controls.target.x - smoothedBasePos.current.x,
           controls.target.y - smoothedBasePos.current.y,
+          0,
           controls.target.z - smoothedBasePos.current.z,
         ];
       }
@@ -378,7 +382,6 @@ export const DeckGLView = React.memo(function ThreeView({
       if (baseMat && cameraRef.current && controlsRef.current) {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
-
         // 平滑机器人物理坐标
         if (smoothedBasePos.current.length() === 0) {
           smoothedBasePos.current.set(baseMat[12], baseMat[13], baseMat[14]);
@@ -394,12 +397,10 @@ export const DeckGLView = React.memo(function ThreeView({
           const targetX = smoothedBasePos.current.x + offset[0];
           const targetY = smoothedBasePos.current.y + offset[1];
           const targetZ = smoothedBasePos.current.z + offset[2];
-
           // 🌟 核心修复：求得本次镜头中心点相对当前的位移增量 dx, dy, dz
           const dx = targetX - controls.target.x;
           const dy = targetY - controls.target.y;
           const dz = targetZ - controls.target.z;
-
           // 只有当坐标发生变化时，同时对观察中心和相机坐标进行完全相等的刚性偏移，锁死相对视角与焦距
           if (Math.abs(dx) > 1e-4 || Math.abs(dy) > 1e-4 || Math.abs(dz) > 1e-4) {
             controls.target.set(targetX, targetY, targetZ);
@@ -414,7 +415,11 @@ export const DeckGLView = React.memo(function ThreeView({
 
       frameCount++;
       if (now - fpsTimer >= 1000) {
-        setRenderFps(frameCount);
+        renderFpsRef.current = frameCount;
+        if (fpsDisplayRef.current) {
+          const pc = Object.values(pointCloudDataRef.current).reduce((a, b) => a + b.length, 0);
+          fpsDisplayRef.current.textContent = `Pts: ${pc.toLocaleString()} | FPS: ${frameCount}`;
+        }
         frameCount = 0;
         fpsTimer = now;
       }
@@ -459,7 +464,8 @@ export const DeckGLView = React.memo(function ThreeView({
         );
 
         const material = new THREE.PointsMaterial({
-          size: d.pointSize ?? 0.05,
+          size: d.pointSize ?? 3,
+          sizeAttenuation: false,
           map: getCircleTexture(),
           vertexColors: true,
           transparent: true,
@@ -473,7 +479,7 @@ export const DeckGLView = React.memo(function ThreeView({
         pointCloudObjects.current[topic] = pointsObj;
       } else {
         const mat = pointsObj.material as THREE.PointsMaterial;
-        mat.size = d.pointSize ?? 0.05;
+        mat.size = d.pointSize ?? 3;
         mat.opacity = d.alpha ?? 1.0;
       }
 
@@ -1512,11 +1518,6 @@ export const DeckGLView = React.memo(function ThreeView({
     [isSettingGoal, goalPosition, goalYaw, fixedFrame, onSendMessage, handleStationClick, getStationFromClick]
   );
 
-  useEffect(() => {
-    const timer = setInterval(() => setRenderFps(fTimesRef.current.length), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   return (
     <div
       ref={containerRef}
@@ -1553,13 +1554,13 @@ export const DeckGLView = React.memo(function ThreeView({
       </div>
 
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
-        <div className="bg-white/80 backdrop-blur-sm p-2 rounded text-xs font-mono shadow text-slate-700">
-          Pts: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: {renderFps}
+        <div ref={fpsDisplayRef} className="bg-white/80 backdrop-blur-sm p-2 rounded text-xs font-mono shadow text-slate-700">
+          Pts: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: --
         </div>
         <button
           onClick={() => {
             if (!isFollowing) {
-              followOffsetRef.current = [0, 0, 0];
+              followOffsetRef.current = [0, 0, 0, 0];
             }
             setIsFollowing(!isFollowing);
           }}
@@ -1577,18 +1578,6 @@ export const DeckGLView = React.memo(function ThreeView({
         >
           {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
         </button>
-        {waypoints.length > 0 && (
-          <div className="relative group">
-            <MapPin size={18} className="m-2 text-slate-500 cursor-pointer" />
-            <div className="absolute bottom-full mb-2 right-0 hidden group-hover:block bg-white shadow-lg rounded p-2 text-xs min-w-[120px]">
-              {waypoints.map((w, i) => (
-                <div key={i} className="py-0.5 whitespace-nowrap">
-                  {w.name}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {confirmStation && (

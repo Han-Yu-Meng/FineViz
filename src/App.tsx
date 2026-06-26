@@ -16,7 +16,7 @@ export default function App() {
   const [layoutPath, setLayoutPath] = useState<string>(() => {
     return localStorage.getItem('fineviz-layout-path') || 'layout/wheelchair.yaml';
   });
-  const { config, waypoints, manifest, loading } = useConfig(layoutPath);
+  const { config, manifest, loading } = useConfig(layoutPath);
 
   useEffect(() => {
     localStorage.setItem('fineviz-layout-path', layoutPath);
@@ -168,9 +168,8 @@ export default function App() {
         </button>
 
         <main className="flex-1 relative z-10 w-full h-full pb-safe">
-          <DeckGLView 
-            config={config} 
-            waypoints={waypoints} 
+          <DeckGLView
+            config={config}
             messages={messages} 
             topicVisibility={topicVisibility} 
             tfVisibility={tfVisibility}

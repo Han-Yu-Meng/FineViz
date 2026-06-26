@@ -3,7 +3,7 @@ import DeckGL from '@deck.gl/react';
 import { OrbitView } from '@deck.gl/core';
 import { PointCloudLayer, LineLayer, TextLayer, PathLayer, ScatterplotLayer, BitmapLayer, GeoJsonLayer } from '@deck.gl/layers';
 import { TripsLayer } from '@deck.gl/geo-layers';
-import { AppConfig, Waypoint } from '../hooks/useConfig';
+import { AppConfig } from '../hooks/useConfig';
 import { Matrix4, Quaternion } from '@math.gl/core';
 
 import { Maximize, Minimize, Crosshair, Navigation, MapPin } from 'lucide-react';
@@ -41,7 +41,6 @@ function rgbaToCanvas(raw: OccupancyGridRaw): HTMLCanvasElement {
 
 interface DeckGLViewProps {
   config: AppConfig | null;
-  waypoints: Waypoint[];
   messages: Record<string, any[]>;
   topicVisibility: Record<string, boolean>;
   tfVisibility: Record<string, boolean>;
@@ -51,9 +50,8 @@ interface DeckGLViewProps {
   showRobotModel: boolean;
 }
 
-export const DeckGLView = React.memo(function DeckGLView({ 
-  config, 
-  waypoints, 
+export const DeckGLView = React.memo(function DeckGLView({
+  config,
   messages, 
   topicVisibility, 
   tfVisibility,
@@ -1139,6 +1137,5 @@ export const DeckGLView = React.memo(function DeckGLView({
          prev.tfVisibility === next.tfVisibility && 
          prev.showRobotModel === next.showRobotModel && 
          prev.config === next.config &&
-         prev.waypoints === next.waypoints &&
          prev.meshModels === next.meshModels;
 });

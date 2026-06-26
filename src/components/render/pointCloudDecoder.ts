@@ -36,11 +36,8 @@ for (let i = 0; i < 256; i++) {
 export function getWarmColor(t: number) { return getWarmColorRaw(t); }
 export function getTurboColor(t: number) { return getTurboColorRaw(t); }
 
-// 限制最终送显的最大点数
-const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-const MAX_GLOBAL_POINTS = isMobileDevice ? 25000 : 80000;
-
 // 静态复用缓冲区，消灭运行时对象分配与 GC 压力
+const MAX_GLOBAL_POINTS = 500000;
 const SHARED_POSITIONS = new Float32Array(MAX_GLOBAL_POINTS * 3);
 const SHARED_COLORS = new Uint8Array(MAX_GLOBAL_POINTS * 3);
 const SHARED_VALS = new Float32Array(MAX_GLOBAL_POINTS);

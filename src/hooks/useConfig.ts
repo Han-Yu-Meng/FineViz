@@ -26,16 +26,8 @@ export interface ConfigManifest {
   path: string;
 }
 
-export interface Waypoint {
-  id: number;
-  name: string;
-  position: { x: number; y: number; z: number };
-  orientation: { x: number; y: number; z: number; w: number };
-}
-
 export function useConfig(layoutPath: string = 'layout/wheelchair.yaml') {
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [manifest, setManifest] = useState<ConfigManifest[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,20 +40,10 @@ export function useConfig(layoutPath: string = 'layout/wheelchair.yaml') {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      fetch(`/${layoutPath}`).then(res => res.text()),
-      fetch('/navigation/waypoints.yaml').then(res => res.text()).catch(() => '')
-    ])
-      .then(([layoutText, waypointsText]) => {
-        const parsedLayout = YAML.parse(layoutText);
-        setConfig(parsedLayout);
-        
-        if (waypointsText) {
-          const parsedWaypoints = YAML.parse(waypointsText);
-          if (parsedWaypoints && parsedWaypoints.waypoints) {
-            setWaypoints(parsedWaypoints.waypoints);
-          }
-        }
+    fetch(`/${layoutPath}`)
+      .then(res => res.text())
+      .then(text => {
+        setConfig(YAML.parse(text));
         setLoading(false);
       })
       .catch(err => {
@@ -70,5 +52,5 @@ export function useConfig(layoutPath: string = 'layout/wheelchair.yaml') {
       });
   }, [layoutPath]);
 
-  return { config, waypoints, manifest, loading };
+  return { config, manifest, loading };
 }
