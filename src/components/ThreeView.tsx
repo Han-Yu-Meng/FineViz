@@ -475,6 +475,7 @@ export const DeckGLView = React.memo(function ThreeView({
         });
 
         pointsObj = new THREE.Points(geometry, material);
+        pointsObj.frustumCulled = false;
         scene.add(pointsObj);
         pointCloudObjects.current[topic] = pointsObj;
       } else {
