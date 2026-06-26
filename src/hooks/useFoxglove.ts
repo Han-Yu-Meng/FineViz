@@ -230,7 +230,7 @@ export function useFoxglove(url: string) {
         messageBufferRef.current[topicName] = [];
       }
       
-      const MAX_LENGTH = 10; 
+      const MAX_LENGTH = 5; 
       
       const buffer = messageBufferRef.current[topicName];
       buffer.push(newMessage);

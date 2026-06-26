@@ -8,7 +8,7 @@ import { ChevronLeft, ChevronRight, Map as MapIcon, Activity, ListTree, LineChar
 import { useConfig } from './hooks/useConfig';
 import { useFoxglove } from './hooks/useFoxglove';
 import { Sidebar } from './components/Sidebar';
-import { DeckGLView } from './components/DeckGLView';
+import { DeckGLView } from './components/ThreeView';
 import { collectLayoutTopics } from './lib/layoutTopics';
 import { useGamepad } from './hooks/useGamepad';
 
