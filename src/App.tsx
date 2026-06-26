@@ -8,7 +8,7 @@ import { ChevronLeft, ChevronRight, Map as MapIcon, Activity, ListTree, LineChar
 import { useConfig } from './hooks/useConfig';
 import { useFoxglove } from './hooks/useFoxglove';
 import { Sidebar } from './components/Sidebar';
-import { DeckGLView } from './components/DeckGLView';
+import { FoxgloveEmbedView } from './components/FoxgloveEmbedView';
 import { collectLayoutTopics } from './lib/layoutTopics';
 import { useGamepad } from './hooks/useGamepad';
 
@@ -16,7 +16,7 @@ export default function App() {
   const [layoutPath, setLayoutPath] = useState<string>(() => {
     return localStorage.getItem('fineviz-layout-path') || 'layout/wheelchair.yaml';
   });
-  const { config, waypoints, manifest, loading } = useConfig(layoutPath);
+  const { config, manifest, loading } = useConfig(layoutPath);
 
   useEffect(() => {
     localStorage.setItem('fineviz-layout-path', layoutPath);
@@ -58,7 +58,17 @@ export default function App() {
 
   useEffect(() => {
     if (!connected) return;
-    layoutTopicNames.forEach((topicName) => subscribe(topicName));
+    layoutTopicNames.forEach((topicName) => {
+      // 过滤掉高带宽的点云、地图和 TF 话题，这些交给嵌入的 Foxglove 处理
+      const isHeavyTopic = topicName === '/tf' ||
+                           topicName === '/tf_static' ||
+                           topicName.includes('cloud') ||
+                           topicName.includes('map');
+
+      if (!isHeavyTopic) {
+        subscribe(topicName);
+      }
+    });
   }, [connected, layoutTopicNames, subscribe]);
 
   const toggleTopicVisibility = useCallback((topicName: string) => {
@@ -168,16 +178,9 @@ export default function App() {
         </button>
 
         <main className="flex-1 relative z-10 w-full h-full pb-safe">
-          <DeckGLView 
-            config={config} 
-            waypoints={waypoints} 
-            messages={messages} 
-            topicVisibility={topicVisibility} 
-            tfVisibility={tfVisibility}
-            onSendMessage={publish}
-            meshModels={meshModels}
-            onMeshModelsChange={setMeshModels}
-            showRobotModel={showRobotModel}
+          <FoxgloveEmbedView
+            wsUrl={`ws://${window.location.hostname}:8765`}
+            layoutJsonPath={'/' + layoutPath}
           />
         </main>
       </div>

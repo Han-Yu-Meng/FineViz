@@ -15,6 +15,7 @@
     "@deck.gl/layers": "^9.2.11",
     "@deck.gl/mesh-layers": "^9.2.11",
     "@deck.gl/react": "^9.2.11",
+    "@foxglove/embed-react": "^0.46.0",
     "@foxglove/rosmsg": "^5.0.5",
     "@foxglove/rosmsg2-serialization": "^3.0.3",
     "@foxglove/ws-protocol": "^0.8.0",

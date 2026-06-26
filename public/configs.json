@@ -1,5 +1,3 @@
 [
-  { "id": "wheelchair", "name": "智能轮椅", "path": "layout/wheelchair.yaml" },
-  { "id": "fins", "name": "Fins 小车", "path": "layout/fins.yaml" },
-  { "id": "weineng", "name": "微能车", "path": "layout/weineng.yaml" }
+  { "id": "wheelchair", "name": "智能轮椅", "path": "layout/wheelchair.json" }
 ]
