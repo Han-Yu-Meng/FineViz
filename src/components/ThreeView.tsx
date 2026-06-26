@@ -357,12 +357,12 @@ export const DeckGLView = React.memo(function ThreeView({
         followOffsetRef.current = [
           controls.target.x - smoothedBasePos.current.x,
           controls.target.y - smoothedBasePos.current.y,
-          0,
+          controls.target.z - smoothedBasePos.current.z,
         ];
       }
     });
 
-    // ── 渲染循环（已彻底精简，无任何动态顶点修改逻辑，高频运行绝对可靠） ──
+    // ── 渲染循环 ──
     let animationId: number;
     let frameCount = 0;
     let fpsTimer = 0;
@@ -375,23 +375,38 @@ export const DeckGLView = React.memo(function ThreeView({
       // 机器人镜头跟随平滑逻辑
       const robotFrame = lCfg.current?.robot?.base_frame || 'base_link';
       const baseMat = worldMatricesRef.current[robotFrame];
-      if (baseMat) {
+      if (baseMat && cameraRef.current && controlsRef.current) {
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+
+        // 平滑机器人物理坐标
         if (smoothedBasePos.current.length() === 0) {
           smoothedBasePos.current.set(baseMat[12], baseMat[13], baseMat[14]);
         } else {
           smoothedBasePos.current.lerp(
             tempPosition.current.set(baseMat[12], baseMat[13], baseMat[14]),
-            0.15
+            0.35 // 提升插值率，跟手反馈响应度极高
           );
         }
 
         if (lFollow.current && !isUserInteractingRef.current) {
           const offset = followOffsetRef.current;
-          controls.target.set(
-            smoothedBasePos.current.x + offset[0],
-            smoothedBasePos.current.y + offset[1],
-            smoothedBasePos.current.z + offset[2]
-          );
+          const targetX = smoothedBasePos.current.x + offset[0];
+          const targetY = smoothedBasePos.current.y + offset[1];
+          const targetZ = smoothedBasePos.current.z + offset[2];
+
+          // 🌟 核心修复：求得本次镜头中心点相对当前的位移增量 dx, dy, dz
+          const dx = targetX - controls.target.x;
+          const dy = targetY - controls.target.y;
+          const dz = targetZ - controls.target.z;
+
+          // 只有当坐标发生变化时，同时对观察中心和相机坐标进行完全相等的刚性偏移，锁死相对视角与焦距
+          if (Math.abs(dx) > 1e-4 || Math.abs(dy) > 1e-4 || Math.abs(dz) > 1e-4) {
+            controls.target.set(targetX, targetY, targetZ);
+            camera.position.x += dx;
+            camera.position.y += dy;
+            camera.position.z += dz;
+          }
         }
       }
 
@@ -472,7 +487,7 @@ export const DeckGLView = React.memo(function ThreeView({
       colAttr.needsUpdate = true;
       geometry.setDrawRange(0, d.length);
 
-      const mat = worldMatrices[d.frameId] || worldMatrices[fixedFrame];
+      const mat = worldMatrices[d.frameId];
       if (mat) {
         tempMatrix.current.fromArray(mat);
         pointsObj.matrix.copy(tempMatrix.current);
@@ -549,7 +564,7 @@ export const DeckGLView = React.memo(function ThreeView({
         mat.needsUpdate = true;
       }
 
-      const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame];
+      const matArray = worldMatrices[d.frameId];
       if (matArray) {
         tempMatrix.current.fromArray(matArray);
         const originMat = new THREE.Matrix4().compose(
@@ -704,7 +719,7 @@ export const DeckGLView = React.memo(function ThreeView({
 
     Object.entries(markerData).forEach(([_topic, frames]) => {
       Object.entries(frames).forEach(([frameId, markers]) => {
-        const matArray = worldMatrices[frameId] || worldMatrices[fixedFrame];
+        const matArray = worldMatrices[frameId];
         const worldMat = matArray ? new THREE.Matrix4().fromArray(matArray) : new THREE.Matrix4().identity();
 
         markers.forEach(m => {
@@ -748,7 +763,7 @@ export const DeckGLView = React.memo(function ThreeView({
 
     Object.entries(pathData).forEach(([_topic, d]) => {
       if (!d.path || d.path.length < 2) return;
-      const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame];
+      const matArray = worldMatrices[d.frameId];
       const worldMat = matArray ? new THREE.Matrix4().fromArray(matArray) : new THREE.Matrix4().identity();
 
       const pts = d.path.map((p: number[]) => new THREE.Vector3(p[0], p[1], p[2] || 0));
