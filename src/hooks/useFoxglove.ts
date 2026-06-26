@@ -28,6 +28,7 @@ export function useFoxglove(url: string) {
   const nextClientChannelIdRef = useRef<number>(10000); // Start from a high range to avoid collisions
 
   const wsRef = useRef<WebSocket | null>(null);
+  const clientRef = useRef<FoxgloveClient | null>(null);
   const topicsRef = useRef<Topic[]>([]);
   const readersRef = useRef<Map<number, MessageReader>>(new Map());
   const writersRef = useRef<Map<number, MessageWriter>>(new Map());
@@ -91,6 +92,10 @@ export function useFoxglove(url: string) {
     const foxgloveClient = new FoxgloveClient({
       ws: ws as any,
     });
+
+    // 必须在注册事件处理器之前设置 clientRef，因为 FoxgloveClient
+    // 可能在 on() 注册时同步触发已缓冲的事件（如 advertise）
+    clientRef.current = foxgloveClient;
 
     foxgloveClient.on("open", () => {
       console.log("Foxglove 连接成功！");
@@ -159,6 +164,21 @@ export function useFoxglove(url: string) {
       // 自动通告并创建本地发布者 (用于 /goal_pose 等反向传输)
       // 如果服务器没有通告这些话题，我们需要在这里主动注册给服务器，
       // 以便服务器后续知道如何处理 sendMessage 传过去的 channelId。
+
+      // 新话题到达后，尝试完成之前失败的待定订阅
+      if (pendingSubscriptionsRef.current.size > 0 && clientRef.current) {
+        const pending = Array.from(pendingSubscriptionsRef.current);
+        for (const topicName of pending) {
+          const topic = topicsRef.current.find(t => t.name === topicName);
+          if (topic && !topicToSubscriptionRef.current.has(topicName)) {
+            const subId = clientRef.current.subscribe(topic.id);
+            console.log(`延迟订阅话题: ${topicName} (ChannelID: ${topic.id}, SubID: ${subId})`);
+            subscriptionsRef.current.set(subId, topicName);
+            topicToSubscriptionRef.current.set(topicName, subId);
+            pendingSubscriptionsRef.current.delete(topicName);
+          }
+        }
+      }
     });
 
     foxgloveClient.on("serverInfo", (info) => {
@@ -246,6 +266,10 @@ export function useFoxglove(url: string) {
     setClient(foxgloveClient);
 
     return () => {
+      clientRef.current = null;
+      pendingSubscriptionsRef.current.clear();
+      subscriptionsRef.current.clear();
+      topicToSubscriptionRef.current.clear();
       foxgloveClient.close();
       ws.close();
       readersRef.current.clear();
@@ -258,24 +282,73 @@ export function useFoxglove(url: string) {
 
   const subscriptionsRef = useRef<Map<number, string>>(new Map());
   const topicToSubscriptionRef = useRef<Map<string, number>>(new Map());
+  const pendingSubscriptionsRef = useRef<Set<string>>(new Set());
 
-  const subscribe = useCallback((topicName: string) => {
-    if (!client) return;
-    const topic = topicsRef.current.find(t => t.name === topicName);
-    if (topic) {
-      if (topicToSubscriptionRef.current.has(topicName)) {
-        console.log(`话题已订阅，跳过重复订阅: ${topicName}`);
-        return;
+  // 🌟 核心修复：每当 topics 状态发生变化（advertise 事件到达），
+  // 自动扫描并完成所有待定订阅。这解决了 open/advertise 事件
+  // 在不同微任务触发导致的时序竞态。
+  useEffect(() => {
+    if (!client || pendingSubscriptionsRef.current.size === 0) return;
+    const pending = Array.from(pendingSubscriptionsRef.current);
+    for (const topicName of pending) {
+      const topic = topicsRef.current.find(t => t.name === topicName);
+      if (topic && !topicToSubscriptionRef.current.has(topicName)) {
+        const subId = client.subscribe(topic.id);
+        console.log(`[reactive] 延迟订阅话题: ${topicName} (ChannelID: ${topic.id}, SubID: ${subId})`);
+        subscriptionsRef.current.set(subId, topicName);
+        topicToSubscriptionRef.current.set(topicName, subId);
+        pendingSubscriptionsRef.current.delete(topicName);
       }
+    }
+  }, [topics, client]);
 
-      const subId = client.subscribe(topic.id);
-      console.log(`正在订阅话题: ${topicName} (ChannelID: ${topic.id}, SubID: ${subId})`);
-      subscriptionsRef.current.set(subId, topicName);
-      topicToSubscriptionRef.current.set(topicName, subId);
+  // 尝试匹配待订阅话题列表中的新到达话题
+  const tryResolvePendingSubscriptions = useCallback(() => {
+    const c = client || clientRef.current;
+    if (!c || pendingSubscriptionsRef.current.size === 0) return;
+    const pending = Array.from(pendingSubscriptionsRef.current);
+    for (const topicName of pending) {
+      const topic = topicsRef.current.find(t => t.name === topicName);
+      if (topic && !topicToSubscriptionRef.current.has(topicName)) {
+        const subId = c.subscribe(topic.id);
+        console.log(`延迟订阅话题: ${topicName} (ChannelID: ${topic.id}, SubID: ${subId})`);
+        subscriptionsRef.current.set(subId, topicName);
+        topicToSubscriptionRef.current.set(topicName, subId);
+        pendingSubscriptionsRef.current.delete(topicName);
+      }
     }
   }, [client]);
 
+  const subscribe = useCallback((topicName: string) => {
+    const c = client || clientRef.current;
+    if (!c) return;
+    const topic = topicsRef.current.find(t => t.name === topicName);
+    if (topic) {
+      if (topicToSubscriptionRef.current.has(topicName)) {
+        return;
+      }
+
+      const subId = c.subscribe(topic.id);
+      console.log(`正在订阅话题: ${topicName} (ChannelID: ${topic.id}, SubID: ${subId})`);
+      subscriptionsRef.current.set(subId, topicName);
+      topicToSubscriptionRef.current.set(topicName, subId);
+      // 成功订阅了一个 topic，顺手清理 pending 中的该条目
+      pendingSubscriptionsRef.current.delete(topicName);
+    } else {
+      // 话题尚未被服务器通告，加入待处理队列等待后续到达
+      pendingSubscriptionsRef.current.add(topicName);
+      console.log(`话题尚未通告，加入待订阅队列: ${topicName}`);
+      // 立即尝试解析：可能 advertise 事件正好在本次 subscribe 调用前刚刚到达
+      tryResolvePendingSubscriptions();
+    }
+  }, [client, tryResolvePendingSubscriptions]);
+
   const unsubscribe = useCallback((topicName: string) => {
+    // 如果还在待订阅队列中，直接移除即可
+    if (pendingSubscriptionsRef.current.has(topicName)) {
+      pendingSubscriptionsRef.current.delete(topicName);
+      return;
+    }
     if (!client) return;
     const topic = topicsRef.current.find(t => t.name === topicName);
     if (topic) {
