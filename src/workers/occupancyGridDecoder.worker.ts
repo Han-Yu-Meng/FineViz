@@ -43,7 +43,7 @@ export function decodeOccupancyGridRaw(
   }
 
   // 移动端降采样
-  const MAX_MOBILE_SIZE = 1024;
+  const MAX_MOBILE_SIZE = 4096;
   let scale = 1.0;
   if (width > MAX_MOBILE_SIZE || height > MAX_MOBILE_SIZE) {
     // 在 Worker 中没有 navigator，由主线程传入是否需要降采样

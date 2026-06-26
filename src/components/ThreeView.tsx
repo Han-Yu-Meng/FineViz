@@ -27,6 +27,30 @@ const decoderWorker = useWorker
   ? new Worker(new URL('../workers/decoder.worker.ts', import.meta.url), { type: 'module' })
   : null;
 
+// 生成圆形点纹理（模块级缓存，只创建一次）
+// 关键：画布填充透明白(rgba(255,255,255,0))，确保边缘插值时不会引入黑色/白色光晕
+let _circleTexture: THREE.Texture | null = null;
+function getCircleTexture(): THREE.Texture {
+  if (_circleTexture) return _circleTexture;
+  const size = 64;
+  const radius = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  // 整张画布填充透明白，避免边缘采样到透明黑产生暗色光晕
+  ctx.fillStyle = 'rgba(255,255,255,0)';
+  ctx.fillRect(0, 0, size, size);
+  // 绘制硬边实心白圆
+  ctx.beginPath();
+  ctx.arc(radius, radius, radius - 1, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,1)';
+  ctx.fill();
+  _circleTexture = new THREE.CanvasTexture(canvas);
+  _circleTexture.needsUpdate = true;
+  return _circleTexture;
+}
+
 function rgbaToCanvas(raw: OccupancyGridRaw): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = raw.width;
@@ -62,7 +86,7 @@ export const DeckGLView = React.memo(function ThreeView({
 }: ThreeViewProps) {
   const fixedFrame = config?.tf?.fixed_frame || 'map';
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(true);
+  const [isFollowing, setIsFollowing] = useState(false);
   const [renderFps, setRenderFps] = useState(0);
 
   const [worldMatrices, setWorldMatrices] = useState<Record<string, number[]>>({});
@@ -85,6 +109,8 @@ export const DeckGLView = React.memo(function ThreeView({
   const [goalYaw, setGoalYaw] = useState<number>(0);
 
   const isInteractingRef = useRef(false);
+  const followOffsetRef = useRef<[number, number, number]>([0, 0, 0]);
+  const isUserInteractingRef = useRef(false);
   const lastGridStampRef = useRef<Record<string, { sec: number; nsec: number }>>({});
   const gridCacheRef = useRef<Record<string, OccupancyGridData>>({});
   const requestIdRef = useRef(0);
@@ -110,6 +136,7 @@ export const DeckGLView = React.memo(function ThreeView({
   const tempPosition = useRef(new THREE.Vector3());
   const tempQuaternion = useRef(new THREE.Quaternion());
   const tempScale = useRef(new THREE.Vector3(1, 1, 1));
+  const smoothedBasePos = useRef(new THREE.Vector3()); // 平滑后的机器人位置
 
   const fTimesRef = useRef<number[]>([]);
   const lMsgs = useRef(messages);
@@ -123,11 +150,12 @@ export const DeckGLView = React.memo(function ThreeView({
   lFollow.current = isFollowing;
 
   // ── 1. Three.js 场景初始化 ──
+// ── 1. Three.js 场景初始化 ──
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
 
     const scene = new THREE.Scene();
-    // 🌟 [修复 1]: 将背景改为高品质的浅灰色，与原有 tailwind bg-slate-100 保持一致
+    // 将背景改为高品质的浅灰色，与原有 tailwind bg-slate-100 保持一致
     scene.background = new THREE.Color(0xf1f5f9);
     sceneRef.current = scene;
 
@@ -137,7 +165,7 @@ export const DeckGLView = React.memo(function ThreeView({
     dirLight.position.set(5, 10, 7);
     scene.add(dirLight);
 
-    // 🌟 [修复 3]: 绘制 XY 地面参考网格，并使其颜色在浅色背景下高度可读
+    // 绘制 XY 地面参考网格，并使其颜色在浅色背景下高度可读
     const gridHelper = new THREE.GridHelper(50, 50, 0x94a3b8, 0xcbd5e1);
     gridHelper.rotation.x = Math.PI / 2; // 绕 X 轴旋转 90 度以平铺在 XY 面上
     scene.add(gridHelper);
@@ -167,20 +195,31 @@ export const DeckGLView = React.memo(function ThreeView({
 
     const controls = new OrbitControls(camera, renderer.domElement);
     
-    // 🌟 [修复 3]: 禁用弹性阻尼过冲滑动，实现“点到即止”
-    controls.enableDamping = false; 
+    // 🌟 [优化 1]: 调整灵敏度，使其在大范围地图缩放与拖拽下高度响应
+    controls.rotateSpeed = 1.0; 
+    controls.zoomSpeed = 1.6;   // 提高中键/双指缩放的反应速度
+    controls.panSpeed = 1.3;    // 提高平移灵敏度，减少大范围划动的次数
     
-    // 🌟 [修复 1]: 调整鼠标按键映射，使其与您之前的 Deck.gl 交互完全一致
+    // 🌟 [优化 2]: 限制平移在地面 (XY 平面) 上，而不是屏幕投影面
+    // 当 camera.up 设为 (0,0,1) 且 screenSpacePanning 为 false 时，拖拽将精确沿 XY 地图平面滑动
+    controls.screenSpacePanning = false;
+
+    // 🌟 [优化 3]: 启用弹性阻尼并设置高阻尼系数 (0.15)
+    // 相比于之前的骤停 (enableDamping = false)，适度的阻尼可以带来更顺滑、符合真实物理惯性的高级交互手感
+    controls.enableDamping = false; 
+    // controls.dampingFactor = 0.15; 
+    
+    // 调整鼠标按键映射，使其与 Deck.gl 交互保持一致
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.PAN,       // 左键拖动 -> 平移
       MIDDLE: THREE.MOUSE.DOLLY,   // 中键滚动 -> 缩放
       RIGHT: THREE.MOUSE.ROTATE    // 右键拖拽 -> 旋转 3D 视角
     };
 
-    // 🌟 [修复 1]: 调整触控手势映射，支持平板上单指平移，双指旋转/缩放
+    // 调整触控手势映射，支持移动端单指平移，双指旋转/缩放
     controls.touches = {
-      ONE: THREE.TOUCH.PAN,        // 单指 -> 平移
-      TWO: THREE.TOUCH.DOLLY_ROTATE // 双指 -> 旋转和缩放
+      ONE: THREE.TOUCH.PAN,        
+      TWO: THREE.TOUCH.DOLLY_ROTATE 
     };
 
     controls.target.set(0, 0, 0);
@@ -215,40 +254,68 @@ export const DeckGLView = React.memo(function ThreeView({
     };
     window.addEventListener('resize', handleResize);
 
-    // ── 渲染循环 (30 fps cap) ──
+    // 用户交互追踪（复刻 DeckGLView onViewStateChange 逻辑）
+    controls.addEventListener('start', () => {
+      isUserInteractingRef.current = true;
+    });
+    controls.addEventListener('end', () => {
+      isUserInteractingRef.current = false;
+      // 交互结束时，若处于跟随模式，记录当前偏移量
+      if (lFollow.current) {
+        followOffsetRef.current = [
+          controls.target.x - smoothedBasePos.current.x,
+          controls.target.y - smoothedBasePos.current.y,
+          0,
+        ];
+      }
+    });
+
+    // ── 渲染循环 ──
     let animationId: number;
     let frameCount = 0;
     let fpsTimer = 0;
-    const TARGET_MS = 1000 / 30;
-    let lastRenderTime = 0;
 
     const tick = (now: number) => {
       animationId = requestAnimationFrame(tick);
 
+      // 🌟 [优化 4]: 移除 30 FPS 硬性帧率限制。
+      // 让 controls.update() 和 WebGL 渲染完全匹配浏览器和屏幕的原生刷新率 (60Hz / 120Hz / 144Hz)。
+      // 此时交互反馈的响应延迟大幅下降，画面的即时跟手感与 Deck.gl 趋于一致。
+      controls.update();
+
+      // 跟随逻辑（平滑源位置 + 直接设置 target）
+      const robotFrame = lCfg.current?.robot?.base_frame || 'base_link';
+      const baseMat = worldMatricesRef.current[robotFrame];
+      if (baseMat) {
+        // 平滑机器人世界位置，消除 100ms TF 更新间隔的跳变
+        if (smoothedBasePos.current.length() === 0) {
+          smoothedBasePos.current.set(baseMat[12], baseMat[13], baseMat[14]);
+        } else {
+          smoothedBasePos.current.lerp(
+            tempPosition.current.set(baseMat[12], baseMat[13], baseMat[14]),
+            0.35,
+          );
+        }
+
+        if (lFollow.current && !isUserInteractingRef.current) {
+          const offset = followOffsetRef.current;
+          controls.target.set(
+            smoothedBasePos.current.x + offset[0],
+            smoothedBasePos.current.y + offset[1],
+            smoothedBasePos.current.z + offset[2],
+          );
+        }
+      }
+
+      renderer.render(scene, camera);
+
+      // FPS 统计计算保持正常工作
       frameCount++;
       if (now - fpsTimer >= 1000) {
         setRenderFps(frameCount);
         frameCount = 0;
         fpsTimer = now;
       }
-
-      if (now - lastRenderTime < TARGET_MS) return;
-      lastRenderTime = now;
-
-      controls.update();
-
-      // 🌟 [修复 2]: 精准无分配相机平滑跟随，直接从世界矩阵提取平移位，彻底解决闪烁与抖动
-      if (lFollow.current) {
-        const robotFrame = lCfg.current?.robot?.base_frame || 'base_link';
-        const baseMat = worldMatricesRef.current[robotFrame];
-        if (baseMat) {
-          // 直接读取矩阵的 [12], [13], [14] 元素作为世界 XYZ 坐标
-          tempPosition.current.set(baseMat[12], baseMat[13], baseMat[14]);
-          controls.target.lerp(tempPosition.current, 0.15); // 平滑插值
-        }
-      }
-
-      renderer.render(scene, camera);
     };
     animationId = requestAnimationFrame(tick);
 
@@ -291,10 +358,12 @@ export const DeckGLView = React.memo(function ThreeView({
 
         const material = new THREE.PointsMaterial({
           size: d.pointSize ?? 0.05,
+          map: getCircleTexture(),
           vertexColors: true,
           transparent: true,
           opacity: d.alpha ?? 1.0,
           depthWrite: true,
+          blending: THREE.NormalBlending,
         });
 
         pointsObj = new THREE.Points(geometry, material);
@@ -366,6 +435,11 @@ export const DeckGLView = React.memo(function ThreeView({
       )?.[1] as any;
       const alpha = topicConfig?.alpha ?? 1.0;
 
+      const halfW = (d.width * d.resolution) / 2;
+      const halfH = (d.height * d.resolution) / 2;
+      const gridW = d.width * d.resolution;
+      const gridH = d.height * d.resolution;
+
       if (!mesh) {
         const geometry = new THREE.PlaneGeometry(1, 1);
         const material = new THREE.MeshBasicMaterial({
@@ -374,8 +448,10 @@ export const DeckGLView = React.memo(function ThreeView({
           opacity: alpha,
           side: THREE.DoubleSide,
           depthWrite: false,
+          depthTest: false, // 确保 grid 不被点云深度遮挡
         });
         mesh = new THREE.Mesh(geometry, material);
+        mesh.renderOrder = -1; // 最先渲染，作为地图底图
         scene.add(mesh);
         gridObjects.current[topic] = mesh;
       } else {
@@ -386,24 +462,26 @@ export const DeckGLView = React.memo(function ThreeView({
         mat.needsUpdate = true;
       }
 
-      mesh.scale.set(d.width * d.resolution, d.height * d.resolution, 1);
-
       const matArray = worldMatrices[d.frameId] || worldMatrices[fixedFrame];
       if (matArray) {
         tempMatrix.current.fromArray(matArray);
-        const localMat = new THREE.Matrix4().compose(
+        // ── 坐标系修复：复刻 DeckGLView BitmapLayer 的逻辑 ──
+        // DeckGL: bounds=[0,0,w*res,h*res] + modelMatrix = baseMat * T(origin) * R(orientation)
+        // Three.js: PlaneGeometry(1,1) 在 XY 面，需要 S(gridW, gridH, 1) + T(halfW, halfH, 0) 来匹配
+        const originMat = new THREE.Matrix4().compose(
           new THREE.Vector3(...d.origin.position),
           new THREE.Quaternion(...d.origin.orientation),
           new THREE.Vector3(1, 1, 1),
         );
-        localMat.premultiply(
-          new THREE.Matrix4().makeTranslation(
-            (d.width * d.resolution) / 2,
-            (d.height * d.resolution) / 2,
-            0,
-          ),
+        // scaleMat: 先把 1x1 平面放大到 grid 尺寸，再平移到正象限
+        const scaleMat = new THREE.Matrix4().compose(
+          new THREE.Vector3(halfW, halfH, 0),
+          new THREE.Quaternion(),
+          new THREE.Vector3(gridW, gridH, 1),
         );
-        mesh.matrix.copy(tempMatrix.current.multiply(localMat));
+        // 矩阵链：worldMat * originMat * scaleMat
+        // 等价于 DeckGL: baseMat.multiplyRight(originMat) + bounds
+        mesh.matrix.copy(tempMatrix.current.clone().multiply(originMat).multiply(scaleMat));
         mesh.matrixAutoUpdate = false;
       }
     });
@@ -479,7 +557,9 @@ export const DeckGLView = React.memo(function ThreeView({
           tempScale.current.set(1, 1, 1),
         );
 
-        instance.matrix.copy(worldMat.clone().multiply(localMat));
+        // 关键：model.matrix 包含 meshLoader 中的 PI/2 X 旋转（GLTF Y-up → ROS Z-up）
+        // 必须乘入最终矩阵，否则会被 matrixAutoUpdate=false + matrix.copy 覆盖丢弃
+        instance.matrix.copy(worldMat.clone().multiply(localMat).multiply(model.matrix));
         instance.matrixAutoUpdate = false;
         group.add(instance);
       });
@@ -948,7 +1028,12 @@ export const DeckGLView = React.memo(function ThreeView({
       {/* 控制按钮 */}
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
         <button
-          onClick={() => setIsFollowing(!isFollowing)}
+          onClick={() => {
+            if (!isFollowing) {
+              followOffsetRef.current = [0, 0, 0];
+            }
+            setIsFollowing(!isFollowing);
+          }}
           className={`p-2 rounded shadow bg-white/85 backdrop-blur-sm transition-colors ${isFollowing ? 'text-blue-600' : 'text-slate-500'}`}
           title={isFollowing ? '取消跟随' : '跟随机器人'}
         >
