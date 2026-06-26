@@ -261,7 +261,7 @@ export function useFoxglove(url: string) {
 
   const subscribe = useCallback((topicName: string) => {
     if (!client) return;
-    const topic = topics.find(t => t.name === topicName);
+    const topic = topicsRef.current.find(t => t.name === topicName);
     if (topic) {
       if (topicToSubscriptionRef.current.has(topicName)) {
         console.log(`话题已订阅，跳过重复订阅: ${topicName}`);
@@ -273,11 +273,11 @@ export function useFoxglove(url: string) {
       subscriptionsRef.current.set(subId, topicName);
       topicToSubscriptionRef.current.set(topicName, subId);
     }
-  }, [client, topics]);
+  }, [client]);
 
   const unsubscribe = useCallback((topicName: string) => {
     if (!client) return;
-    const topic = topics.find(t => t.name === topicName);
+    const topic = topicsRef.current.find(t => t.name === topicName);
     if (topic) {
       console.log(`正在取消订阅话题: ${topicName}`);
       const subId = topicToSubscriptionRef.current.get(topicName);
@@ -287,7 +287,7 @@ export function useFoxglove(url: string) {
         topicToSubscriptionRef.current.delete(topicName);
       }
     }
-  }, [client, topics]);
+  }, [client]);
 
   const publish = useCallback((topicName: string, schemaName: string, data: any) => {
     if (!client) return;

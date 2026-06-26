@@ -94,7 +94,7 @@ function makeStationLabelSprite(text: string, isHovered: boolean, maxAnisotropy 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
   
-  const fontSize = 64;
+  const fontSize = 24;
   ctx.font = `bold ${fontSize}px Inter, system-ui, -apple-system, sans-serif`;
   const textWidth = ctx.measureText(text).width;
 
@@ -679,6 +679,92 @@ export const DeckGLView = React.memo(function ThreeView({
 
     const links = Object.values(tfTree);
     const axisLength = config?.tf?.axis_length ?? 0.5;
+    const axisRadius = config?.tf?.axis_width ?? 0.05;
+    const labelVisualize = config?.tf?.axis_label_visualize ?? true;
+
+    // 创建坐标轴圆柱体的辅助函数
+    const makeAxisCylinder = (
+      from: THREE.Vector3, to: THREE.Vector3, color: number, radius: number
+    ) => {
+      const dir = new THREE.Vector3().subVectors(to, from);
+      const len = dir.length();
+      if (len < 1e-6) return null;
+      const geo = new THREE.CylinderGeometry(radius, radius, len, 8);
+      const mat = new THREE.MeshBasicMaterial({ color });
+      const mesh = new THREE.Mesh(geo, mat);
+      // CylinderGeometry 默认沿 Y 轴，需要旋转到方向向量
+      const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
+      mesh.position.copy(mid);
+      const up = new THREE.Vector3(0, 1, 0);
+      const quat = new THREE.Quaternion().setFromUnitVectors(up, dir.normalize());
+      mesh.quaternion.copy(quat);
+      return mesh;
+    };
+
+    // 创建标签 Sprite 的辅助函数（高分辨率 canvas）
+    const makeLabelSprite = (text: string, position: THREE.Vector3) => {
+      const dpr = window.devicePixelRatio || 2;
+      const fontSize = 10;
+      const padX = 24, padY = 12;
+      const radius = 8;
+
+      // 先测量文字宽度
+      const measureCanvas = document.createElement('canvas');
+      const measureCtx = measureCanvas.getContext('2d')!;
+      measureCtx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+      const textWidth = measureCtx.measureText(text).width;
+
+      const cssW = textWidth + padX * 2;
+      const cssH = fontSize + padY * 2;
+      const canvasW = Math.ceil(cssW * dpr);
+      const canvasH = Math.ceil(cssH * dpr);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      const ctx = canvas.getContext('2d')!;
+      ctx.scale(dpr, dpr);
+
+      // 背景卡片
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.beginPath();
+      ctx.roundRect?.(0, 0, cssW, cssH, radius);
+      ctx.fill();
+
+      // 文字
+      ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+      ctx.fillStyle = '#1e293b';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, cssW / 2, cssH / 2);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.anisotropy = 4;
+      texture.needsUpdate = true;
+
+      const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+      const sprite = new THREE.Sprite(spriteMat);
+      const scale = 0.012 / dpr;
+      sprite.scale.set(canvasW * scale, canvasH * scale, 1);
+      sprite.position.copy(position);
+      return sprite;
+    };
+
+    // fixedFrame 原点坐标轴
+    const origin = new THREE.Vector3(0, 0, 0);
+    const xTip = new THREE.Vector3(axisLength, 0, 0);
+    const yTip = new THREE.Vector3(0, axisLength, 0);
+    const zTip = new THREE.Vector3(0, 0, axisLength);
+    [
+      makeAxisCylinder(origin, xTip, 0xef4444, axisRadius),
+      makeAxisCylinder(origin, yTip, 0x22c55e, axisRadius),
+      makeAxisCylinder(origin, zTip, 0x3b82f6, axisRadius),
+    ].forEach(m => m && group.add(m));
+    if (labelVisualize) {
+      group.add(makeLabelSprite(fixedFrame, origin));
+    }
 
     links.forEach(link => {
       const isHidden =
@@ -691,28 +777,29 @@ export const DeckGLView = React.memo(function ThreeView({
       const origin = worldMat.transform([0, 0, 0]);
       const originVec = new THREE.Vector3(origin[0], origin[1], origin[2]);
 
+      // 父子连接线（黄色）
       const parentMat = getFrameMatrix(link.parent, tfTree, fixedFrame);
       const parentOrigin = parentMat.transform([0, 0, 0]);
       const lineGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(parentOrigin[0], parentOrigin[1], parentOrigin[2]),
         originVec,
       ]);
-      const lineObj = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x94a3b8 }));
-      group.add(lineObj);
+      group.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xeab308 })));
 
-      [0, 1, 2].forEach(axis => {
-        const tip = worldMat.transform([
-          axis === 0 ? axisLength : 0,
-          axis === 1 ? axisLength : 0,
-          axis === 2 ? axisLength : 0,
-        ]);
-        const color = axis === 0 ? 0xef4444 : axis === 1 ? 0x22c55e : 0x3b82f6;
-        const axisGeo = new THREE.BufferGeometry().setFromPoints([
-          originVec,
-          new THREE.Vector3(tip[0], tip[1], tip[2]),
-        ]);
-        group.add(new THREE.Line(axisGeo, new THREE.LineBasicMaterial({ color })));
-      });
+      // 三轴坐标（粗圆柱体）
+      const xTip = new THREE.Vector3(...worldMat.transform([axisLength, 0, 0]));
+      const yTip = new THREE.Vector3(...worldMat.transform([0, axisLength, 0]));
+      const zTip = new THREE.Vector3(...worldMat.transform([0, 0, axisLength]));
+      [
+        makeAxisCylinder(originVec, xTip, 0xef4444, axisRadius),
+        makeAxisCylinder(originVec, yTip, 0x22c55e, axisRadius),
+        makeAxisCylinder(originVec, zTip, 0x3b82f6, axisRadius),
+      ].forEach(m => m && group.add(m));
+
+      // 帧标签
+      if (labelVisualize) {
+        group.add(makeLabelSprite(link.child, originVec));
+      }
     });
   }, [tfTree, fixedFrame, config?.tf, tfVisibility]);
 
@@ -1110,6 +1197,13 @@ export const DeckGLView = React.memo(function ThreeView({
                 ],
               };
               changed = true;
+              // 监控 map→odom 变换
+              if (parentFrameId === 'map' && childFrameId === 'odom') {
+                console.log('[TF] map→odom 更新:', {
+                  position: [t.transform.translation.x, t.transform.translation.y, t.transform.translation.z],
+                  rotation: [t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w],
+                });
+              }
             }
           }
         }
