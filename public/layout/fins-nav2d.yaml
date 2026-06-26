@@ -30,10 +30,10 @@ visualize:
     color: "#5D99E3"
     alpha: 0.9
   
-  trajectories:
-    topic: "/trajectories"
-    type: "visualization_msgs/msg/MarkerArray"
-    alpha: 0.8
+  #trajectories:
+  #  topic: "/trajectories"
+  #  type: "visualization_msgs/msg/MarkerArray"
+  #  alpha: 0.8
 
   projected_map:
     topic: "/projected_map"
