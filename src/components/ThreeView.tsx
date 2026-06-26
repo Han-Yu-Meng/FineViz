@@ -802,12 +802,14 @@ export const DeckGLView = React.memo(function ThreeView({
     const endX = startX + Math.cos(goalYaw) * arrowLen;
     const endY = startY + Math.sin(goalYaw) * arrowLen;
 
-    // 箭杆 (shaft)
-    const shaftGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(startX, startY, z),
-      new THREE.Vector3(endX, endY, z),
-    ]);
-    group.add(new THREE.Line(shaftGeo, new THREE.LineBasicMaterial({ color: 0xff3232 })));
+    // 箭杆 (shaft) — 用圆柱体替代 Line，保证可见粗度
+    const shaftRadius = 0.04;
+    const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, arrowLen, 8);
+    const shaftMat = new THREE.MeshBasicMaterial({ color: 0xff3232 });
+    const shaftMesh = new THREE.Mesh(shaftGeo, shaftMat);
+    shaftMesh.position.set((startX + endX) / 2, (startY + endY) / 2, z);
+    shaftMesh.rotation.set(0, 0, goalYaw - Math.PI / 2);
+    group.add(shaftMesh);
 
     // 箭头 (cone arrowhead)
     const headLength = 0.25;
