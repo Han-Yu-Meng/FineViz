@@ -68,6 +68,8 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
   const xf = fields.find(f => f.name === 'x'), yf = fields.find(f => f.name === 'y'), zf = fields.find(f => f.name === 'z');
   if (!xf || !yf || !zf) return null;
   const cf = colorField ? fields.find(f => f.name === colorField) : undefined;
+  // 判断是否为打包 RGB/RGBA 字段（float32 的原始字节编码 R,G,B,A）
+  const isPackedRgb = cf && (cf.name === 'rgb' || cf.name === 'rgba') && (cf.datatype === 7 || cf.datatype === 6);
   const bytes = msg.data instanceof Uint8Array ? msg.data : new Uint8Array(msg.data);
   const le = !msg.is_bigendian, step = msg.point_step, total = Math.min(msg.width * msg.height, Math.floor(bytes.byteLength / step));
   
@@ -87,15 +89,22 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
 
   if (isAlignedFloat) {
     const f32 = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+    const u32 = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
     const sW = step / 4, xW = xf.offset / 4, yW = yf.offset / 4, zW = zf.offset / 4, cW = cf ? cf.offset / 4 : 0;
-    
+
     for (let i = 0; i < total && idx < count; i += stride) {
         const b = i * sW;
         const x = f32[b + xW], y = f32[b + yW], z = f32[b + zW];
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
 
         pos[idx * 3] = x; pos[idx * 3 + 1] = y; pos[idx * 3 + 2] = z;
-        if (cf && vals) {
+        if (isPackedRgb && cf) {
+            // 打包 RGB：从 float32 的原始字节中提取 R,G,B
+            const bits = u32[b + cW];
+            col[idx * 3]     = (bits >> 16) & 0xff;
+            col[idx * 3 + 1] = (bits >> 8) & 0xff;
+            col[idx * 3 + 2] = bits & 0xff;
+        } else if (cf && vals) {
             const v = f32[b + cW];
             if (Number.isFinite(v)) {
                 vals[idx] = v;
@@ -104,15 +113,15 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
             } else {
                 vals[idx] = 0;
             }
-        } else { 
-            col[idx * 3] = 255; col[idx * 3 + 1] = 255; col[idx * 3 + 2] = 255; 
+        } else {
+            col[idx * 3] = 255; col[idx * 3 + 1] = 255; col[idx * 3 + 2] = 255;
         }
         idx++;
     }
   } else {
     // 针对非对齐字节的 DataView 慢速解析
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    
+
     for (let i = 0; i < total && idx < count; i += stride) {
       const b = i * step;
       if (b + Math.max(xf.offset, yf.offset, zf.offset) + 4 > dv.byteLength) break;
@@ -120,7 +129,13 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
 
       pos[idx * 3] = x; pos[idx * 3 + 1] = y; pos[idx * 3 + 2] = z;
-      if (cf && vals) {
+      if (isPackedRgb && cf) {
+        // 打包 RGB：按原始字节读取 R,G,B
+        const bits = dv.getUint32(b + cf.offset, le);
+        col[idx * 3]     = (bits >> 16) & 0xff;
+        col[idx * 3 + 1] = (bits >> 8) & 0xff;
+        col[idx * 3 + 2] = bits & 0xff;
+      } else if (cf && vals) {
         const v = readFieldValue(dv, b + cf.offset, cf.datatype, le);
         if (Number.isFinite(v)) {
           vals[idx] = v;
@@ -129,8 +144,8 @@ export function decodePointCloud(msg: any, colorField: string | undefined, color
         } else {
           vals[idx] = 0;
         }
-      } else { 
-        col[idx * 3] = 255; col[idx * 3 + 1] = 255; col[idx * 3 + 2] = 255; 
+      } else {
+        col[idx * 3] = 255; col[idx * 3 + 1] = 255; col[idx * 3 + 2] = 255;
       }
       idx++;
     }

@@ -287,8 +287,8 @@ export const DeckGLView = React.memo(function ThreeView({
     const camera = new THREE.PerspectiveCamera(
       60,
       containerRef.current.clientWidth / containerRef.current.clientHeight,
-      0.1,
-      100000
+      1.0,
+      20000
     );
     camera.up.set(0, 0, 1);
     camera.position.set(-6, -6, 8);
@@ -298,7 +298,6 @@ export const DeckGLView = React.memo(function ThreeView({
       canvas: canvasRef.current,
       antialias: true,
       alpha: false,
-      logarithmicDepthBuffer: true,
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
@@ -471,7 +470,7 @@ export const DeckGLView = React.memo(function ThreeView({
           vertexColors: true,
           transparent: true,
           opacity: d.alpha ?? 1.0,
-          depthWrite: true,
+          depthWrite: false,
           blending: THREE.NormalBlending,
         });
 
