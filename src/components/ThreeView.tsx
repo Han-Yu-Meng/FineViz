@@ -345,11 +345,15 @@ export const DeckGLView = React.memo(function ThreeView({
 
     const handleResize = () => {
       if (!containerRef.current || !camera || !renderer) return;
-      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+      const w = containerRef.current.clientWidth;
+      const h = containerRef.current.clientHeight;
+      if (w === 0 || h === 0) return;
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+      renderer.setSize(w, h);
     };
-    window.addEventListener('resize', handleResize);
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(containerRef.current);
 
     controls.addEventListener('start', () => {
       isUserInteractingRef.current = true;
@@ -428,7 +432,7 @@ export const DeckGLView = React.memo(function ThreeView({
 
     return () => {
       cancelAnimationFrame(animationId);
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       renderer.dispose();
     };
   }, []);
