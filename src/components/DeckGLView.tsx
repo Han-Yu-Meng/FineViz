@@ -12,6 +12,7 @@ import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
 import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
+import type { OccupancyGridRaw } from './render/types';
 import { parseURDF, URDFRobot } from './render/urdfParser';
 import { loadGLB } from './render/meshLoader';
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers';
@@ -22,6 +23,23 @@ import { MapPin, Navigation } from 'lucide-react';
 const MAX_COMBINED_POINTS = 500000;
 const COMBINED_POSITIONS = new Float32Array(MAX_COMBINED_POINTS * 3);
 const COMBINED_COLORS = new Uint8Array(MAX_COMBINED_POINTS * 3);
+
+// ── Web Worker 实例（模块级单例）──
+const useWorker = typeof Worker !== 'undefined';
+const decoderWorker = useWorker
+  ? new Worker(new URL('../workers/decoder.worker.ts', import.meta.url), { type: 'module' })
+  : null;
+
+/** 在主线程将 Worker 返回的原始 RGBA 数据写入 Canvas（轻量操作，< 1ms） */
+function rgbaToCanvas(raw: OccupancyGridRaw): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = raw.width;
+  canvas.height = raw.height;
+  const ctx = canvas.getContext('2d')!;
+  const imgData = new ImageData(raw.rgba, raw.width, raw.height);
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
 
 interface DeckGLViewProps {
   config: AppConfig | null;
@@ -100,6 +118,39 @@ export const DeckGLView = React.memo(function DeckGLView({
   const lastGridStampRef = useRef<Record<string, { sec: number; nsec: number }>>({});
   const gridCacheRef = useRef<Record<string, OccupancyGridData>>({});
 
+  // Worker 请求 ID 计数器
+  const requestIdRef = useRef(0);
+
+  // Worker 解码结果回调 —— 接收 Transferable 回传数据并写入 React state
+  useEffect(() => {
+    if (!decoderWorker) return;
+    decoderWorker.onmessage = (e: MessageEvent) => {
+      const { type, topic, payload } = e.data;
+      if (type === 'PC_RESULT') {
+        if (payload) {
+          if (payload.frameId.startsWith('/')) {
+            payload.frameId = payload.frameId.substring(1);
+          }
+          setPointCloudData(prev => ({ ...prev, [topic]: payload }));
+        }
+      } else if (type === 'GRID_RESULT') {
+        if (payload) {
+          const canvas = rgbaToCanvas(payload);
+          const data: OccupancyGridData = {
+            width: payload.width,
+            height: payload.height,
+            resolution: payload.resolution,
+            origin: payload.origin,
+            canvas,
+            frameId: payload.frameId,
+          };
+          gridCacheRef.current[topic] = data;
+          setGridData({ ...gridCacheRef.current });
+        }
+      }
+    };
+  }, []);
+
   // 移动端限制最大 DPR 为 1.5，兼顾清晰度与显存（DPR=3 → 9倍像素，DPR=1.5 → 2.25倍）
   const dpr = useMemo(() => {
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -138,52 +189,68 @@ export const DeckGLView = React.memo(function DeckGLView({
     const msgs = lMsgs.current, cfg = lCfg.current, vis = lVis.current;
     if (!cfg) return;
 
-    // --- Update Point Cloud ---
+    // --- Update Point Cloud (via Web Worker) ---
     const pcConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'sensor_msgs/msg/PointCloud2' && item?.topic);
-    const nextPc: Record<string, PointCloudBinary> = {};
     const now = Date.now();
     for (const c of pcConfigs as any[]) {
       if (!(vis[c.topic] ?? true)) continue;
       const m = msgs[c.topic] || [];
       if (m.length === 0) continue;
       const sel = c.listen_updates ? (c.last_time > 0 ? m.filter((msg: any) => (msg.receivedAt || 0) >= now - c.last_time * 1000) : [m[m.length - 1]]) : [m[m.length - 1]];
-      
-      const res = sel.map(s => {
-        const decoded = decodePointCloud(s.data, c.color_field, c.color_scheme, 100000, 100000);
-        if (decoded && decoded.frameId.startsWith('/')) {
-          decoded.frameId = decoded.frameId.substring(1);
+      if (sel.length === 0) continue;
+
+      if (decoderWorker) {
+        // 异步：将原始数据发送到 Worker，解码 + 合并全部在后台线程完成
+        const reqId = ++requestIdRef.current;
+        decoderWorker.postMessage({
+          id: reqId,
+          type: 'PC_BATCH_DECODE',
+          topic: c.topic,
+          data: sel.map((s: any) => s.data),
+          options: {
+            colorField: c.color_field,
+            colorScheme: c.color_scheme,
+            targetMaxPoints: 100000,
+            pointSize: c.point_size,
+            alpha: c.alpha,
+          }
+        });
+      } else {
+        // 同步回退（无 Worker 环境）
+        const res = sel.map(s => {
+          const decoded = decodePointCloud(s.data, c.color_field, c.color_scheme, 100000);
+          if (decoded && decoded.frameId.startsWith('/')) {
+            decoded.frameId = decoded.frameId.substring(1);
+          }
+          return decoded;
+        }).filter(r => r !== null) as PointCloudBinary[];
+
+        if (res.length > 0) {
+          let totalLen = 0;
+          for (const f of res) totalLen += f.length;
+          if (totalLen > MAX_COMBINED_POINTS) totalLen = MAX_COMBINED_POINTS;
+
+          let off = 0;
+          for (const f of res) {
+            if (off + f.length > MAX_COMBINED_POINTS) break;
+            COMBINED_POSITIONS.set(f.positions, off * 3);
+            COMBINED_COLORS.set(f.colors, off * 3);
+            off += f.length;
+          }
+
+          const nextPc: Record<string, PointCloudBinary> = {};
+          nextPc[c.topic] = {
+            length: off,
+            positions: COMBINED_POSITIONS.slice(0, off * 3),
+            colors: COMBINED_COLORS.slice(0, off * 3),
+            frameId: res[0].frameId,
+            pointSize: c.point_size,
+            alpha: c.alpha
+          };
+          setPointCloudData(prev => ({ ...prev, ...nextPc }));
         }
-        return decoded;
-      }).filter(r => r !== null) as PointCloudBinary[];
-      
-      if (res.length > 0) {
-        let totalLen = 0;
-        for (const f of res) totalLen += f.length;
-        
-        // 防溢出保护
-        if (totalLen > MAX_COMBINED_POINTS) totalLen = MAX_COMBINED_POINTS;
-        
-        let off = 0;
-        for (const f of res) {
-          if (off + f.length > MAX_COMBINED_POINTS) break;
-          // ✅ 复用静态内存池，完全消除 GC 垃圾
-          COMBINED_POSITIONS.set(f.positions, off * 3);
-          COMBINED_COLORS.set(f.colors, off * 3);
-          off += f.length;
-        }
-        
-        nextPc[c.topic] = { 
-          length: off, 
-          // 最后仅通过 slice 扣除我们需要的部分传给 DeckGL (底层内存连续拷贝，速度极快)
-          positions: COMBINED_POSITIONS.slice(0, off * 3), 
-          colors: COMBINED_COLORS.slice(0, off * 3), 
-          frameId: res[0].frameId,
-          pointSize: c.point_size,
-          alpha: c.alpha
-        };
       }
     }
-    setPointCloudData(nextPc);
 
     // --- Update Path Data ---
     const pathConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'nav_msgs/msg/Path' && item?.topic);
@@ -240,9 +307,8 @@ export const DeckGLView = React.memo(function DeckGLView({
     }
     setMarkerData(nextMarkers);
 
-    // --- Update Occupancy Grids ---
+    // --- Update Occupancy Grids (via Web Worker) ---
     const gridConfigs = Object.values(cfg.visualize || {}).filter((item: any) => item?.type === 'nav_msgs/msg/OccupancyGrid' && item?.topic);
-    let gridChanged = false;
     for (const c of gridConfigs as any[]) {
       if (!(vis[c.topic] ?? true)) continue;
       const m = msgs[c.topic] || [];
@@ -259,16 +325,29 @@ export const DeckGLView = React.memo(function DeckGLView({
         lastGridStampRef.current[c.topic] = { sec: stamp.sec, nsec: stamp.nsec };
       }
 
-      const cached = gridCacheRef.current[c.topic];
-      const res = decodeOccupancyGrid(latestMsg.data, cached);
-      if (res) {
-        gridCacheRef.current[c.topic] = res;
-        gridChanged = true;
+      if (decoderWorker) {
+        // 异步：栅格解码移入 Worker（输出原始 RGBA，主线程创建 Canvas）
+        const cached = gridCacheRef.current[c.topic];
+        const reqId = ++requestIdRef.current;
+        decoderWorker.postMessage({
+          id: reqId,
+          type: 'GRID_DECODE',
+          topic: c.topic,
+          data: latestMsg.data,
+          options: {
+            existingWidth: cached?.width,
+            existingHeight: cached?.height,
+          }
+        });
+      } else {
+        // 同步回退
+        const cached = gridCacheRef.current[c.topic];
+        const res = decodeOccupancyGrid(latestMsg.data, cached);
+        if (res) {
+          gridCacheRef.current[c.topic] = res;
+          setGridData({ ...gridCacheRef.current });
+        }
       }
-    }
-    // 仅当有新数据解码时才触发 React 状态更新
-    if (gridChanged) {
-      setGridData({ ...gridCacheRef.current });
     }
 
     // --- Update GeoJSON from ROS topic ---

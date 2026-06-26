@@ -50,7 +50,7 @@ export function decodeOccupancyGrid(msg: any, existing?: OccupancyGridData): Occ
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
   // 📱 移动端安全控制：最大纹理尺寸限制为 2048 像素，防止爆显存
-  const MAX_MOBILE_SIZE = 2048;
+  const MAX_MOBILE_SIZE = 1024;
   let scale = 1.0;
   if (isMobile && (width > MAX_MOBILE_SIZE || height > MAX_MOBILE_SIZE)) {
     scale = Math.min(MAX_MOBILE_SIZE / width, MAX_MOBILE_SIZE / height);

@@ -13,7 +13,7 @@
     </visual>
   </link>
 
-  <link name="livox_frame_192_168_1_187">
+  <link name="main_lidar">
     <visual>
       <origin
         xyz="0 0 -0.04"
@@ -25,7 +25,7 @@
     </visual>
   </link>
   
-  <link name="livox_frame_192_168_1_198">
+  <link name="sub_lidar">
       <visual>
       <origin
         xyz="0 0 -0.04"
@@ -38,25 +38,25 @@
   </link>
   
   
-  <joint name="livox_frame_192_168_1_187" type="fixed">
+  <joint name="main_lidar" type="fixed">
     <origin
       xyz="0.54961 0.23901 0.19335"
       rpy="0.0209 0.22689 -0.00698" /> <!-- 0  15°  0 -->
     <parent
       link="base_link" />
     <child
-      link="livox_frame_192_168_1_187" />
+      link="main_lidar" />
   </joint>
   
    
-  <joint name="livox_frame_192_168_1_198" type="fixed">
+  <joint name="sub_lidar" type="fixed">
     <origin
       xyz="0.54961 -0.23901 0.16335"
       rpy="-0.02269 0.22689 0.01396" /> <!-- 0  15°  0 -->
     <parent
       link="base_link" />
     <child
-      link="livox_frame_192_168_1_198" />
+      link="sub_lidar" />
   </joint>
 
 </robot>
