@@ -1524,7 +1524,7 @@ export const DeckGLView = React.memo(function ThreeView({
   };
 
   // ── 逆向投影获取地面坐标 ──
-  const getGroundCoordinate = useCallback((e: React.MouseEvent): [number, number, number] | null => {
+  const getGroundCoordinate = useCallback((e: { clientX: number; clientY: number }): [number, number, number] | null => {
     if (!cameraRef.current || !canvasRef.current) return null;
     const rect = canvasRef.current.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -1586,7 +1586,7 @@ export const DeckGLView = React.memo(function ThreeView({
   );
 
   const handleCanvasMouseMove = useCallback(
-    (e: React.MouseEvent) => {
+    (e: { clientX: number; clientY: number }) => {
       if (isSettingGoal && goalDragActiveRef.current && goalPosition) {
         const coords = getGroundCoordinate(e);
         if (coords) {
@@ -1657,7 +1657,7 @@ export const DeckGLView = React.memo(function ThreeView({
         className="absolute inset-0 w-full h-full block"
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
-        onMouseMove={handleCanvasMouseMove}
+        onPointerMove={handleCanvasMouseMove}
         style={{ cursor: hoveredStationId ? 'pointer' : 'grab' }}
       />
 
