@@ -26,7 +26,7 @@ visualize:
     topic: "/plan"
     type: "nav_msgs/msg/Path"
     listen_updates: true
-    width: 0.2
+    width: 1.0
     color: "#5D99E3"
     alpha: 0.9
   
@@ -71,7 +71,7 @@ tf:
   fixed_frame: "map"
 
   axis_length: 0.2
-  axis_width: 0.05
+  axis_width: 0.02
   axis_label_visualize: false
       
 robot:

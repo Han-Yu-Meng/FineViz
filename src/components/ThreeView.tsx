@@ -93,7 +93,7 @@ function getNodeTexture(hovered: boolean): THREE.Texture {
 function makeStationLabelSprite(text: string, isHovered: boolean, maxAnisotropy = 1): THREE.Sprite {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
-  
+
   const fontSize = 24;
   ctx.font = `bold ${fontSize}px Inter, system-ui, -apple-system, sans-serif`;
   const textWidth = ctx.measureText(text).width;
@@ -268,7 +268,7 @@ export const DeckGLView = React.memo(function ThreeView({
     if (!canvasRef.current || !containerRef.current) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf1f5f9); 
+    scene.background = new THREE.Color(0xf1f5f9);
     sceneRef.current = scene;
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
@@ -857,21 +857,51 @@ export const DeckGLView = React.memo(function ThreeView({
     const group = pathGroup.current;
     if (!group) return;
 
-    while (group.children.length > 0) group.remove(group.children[0]);
+    while (group.children.length > 0) {
+      const child = group.children[0];
+      group.remove(child);
+      if (child instanceof Line2) {
+        child.geometry.dispose();
+        child.material.dispose();
+      } else if (child instanceof THREE.Line) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+        else child.material.dispose();
+      }
+    }
+
+    const rendererSize = rendererRef.current?.getSize(new THREE.Vector2()) || new THREE.Vector2(800, 600);
 
     Object.entries(pathData).forEach(([_topic, d]) => {
       if (!d.path || d.path.length < 2) return;
       const matArray = worldMatrices[d.frameId];
       const worldMat = matArray ? new THREE.Matrix4().fromArray(matArray) : new THREE.Matrix4().identity();
 
-      const pts = d.path.map((p: number[]) => new THREE.Vector3(p[0], p[1], p[2] || 0));
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const positions: number[] = [];
+      d.path.forEach((p: number[]) => {
+        positions.push(p[0], p[1], (p[2] || 0) + 0.03);
+      });
+
       const color = new THREE.Color(
         (d.color?.[0] ?? 93) / 255,
         (d.color?.[1] ?? 153) / 255,
         (d.color?.[2] ?? 227) / 255
       );
-      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
+      // 从配置中读取线宽，默认 0.15 世界单位（约 15cm）
+      const lineWidth = d.width ? d.width / 20 : 0.15;
+
+      const geo = new LineGeometry();
+      geo.setPositions(positions);
+      const mat = new LineMaterial({
+        color: color.getHex(),
+        linewidth: lineWidth,
+        worldUnits: true,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: true,
+        resolution: rendererSize,
+      });
+      const line = new Line2(geo, mat);
       line.matrix.copy(worldMat);
       line.matrixAutoUpdate = false;
       group.add(line);
@@ -887,15 +917,15 @@ export const DeckGLView = React.memo(function ThreeView({
 
     if (!goalPosition || !isSettingGoal) return;
 
-    const arrowLen = 1.0;
-    const z = 0.1;
+    const arrowLen = 1.2;
+    const z = 0.15;
     const startX = goalPosition[0];
     const startY = goalPosition[1];
     const endX = startX + Math.cos(goalYaw) * arrowLen;
     const endY = startY + Math.sin(goalYaw) * arrowLen;
 
-    // 箭杆 (shaft) — 用圆柱体替代 Line，保证可见粗度
-    const shaftRadius = 0.04;
+    // 箭杆 —— 红色粗圆柱
+    const shaftRadius = 0.08;
     const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, arrowLen, 8);
     const shaftMat = new THREE.MeshBasicMaterial({ color: 0xff3232 });
     const shaftMesh = new THREE.Mesh(shaftGeo, shaftMat);
@@ -903,15 +933,12 @@ export const DeckGLView = React.memo(function ThreeView({
     shaftMesh.rotation.set(0, 0, goalYaw - Math.PI / 2);
     group.add(shaftMesh);
 
-    // 箭头 (cone arrowhead)
-    const headLength = 0.25;
-    const headRadius = 0.12;
-    const headGeo = new THREE.ConeGeometry(headRadius, headLength, 8, 1);
+    // 箭头 —— 红色圆锥
+    const headLength = 0.4;
+    const headRadius = 0.2;
+    const headGeo = new THREE.ConeGeometry(headRadius, headLength, 12, 1);
     const headMat = new THREE.MeshBasicMaterial({ color: 0xff3232 });
     const headMesh = new THREE.Mesh(headGeo, headMat);
-
-    // 将锥体定位到箭头尖端，并旋转使其指向 yaw 方向
-    // ConeGeometry 默认尖端朝 +Y，需要旋转到 XY 平面并指向 yaw 方向
     headMesh.position.set(endX, endY, z);
     headMesh.rotation.set(0, 0, goalYaw - Math.PI / 2);
     group.add(headMesh);
@@ -1202,13 +1229,6 @@ export const DeckGLView = React.memo(function ThreeView({
                 ],
               };
               changed = true;
-              // 监控 map→odom 变换
-              if (parentFrameId === 'map' && childFrameId === 'odom') {
-                console.log('[TF] map→odom 更新:', {
-                  position: [t.transform.translation.x, t.transform.translation.y, t.transform.translation.z],
-                  rotation: [t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w],
-                });
-              }
             }
           }
         }
@@ -1476,8 +1496,15 @@ export const DeckGLView = React.memo(function ThreeView({
     const handleResize = () => {
       const size = rendererRef.current?.getSize(new THREE.Vector2());
       if (!size) return;
-      line2Refs.current.forEach(line => {
-        (line.material as LineMaterial).resolution.copy(size);
+      // 更新所有 Line2 材质的分辨率（GeoJSON 线条 + Path 路径线）
+      const allGroups = [geojsonGroup.current, pathGroup.current];
+      allGroups.forEach(group => {
+        if (!group) return;
+        group.children.forEach(child => {
+          if (child instanceof Line2) {
+            (child.material as LineMaterial).resolution.copy(size);
+          }
+        });
       });
     };
     window.addEventListener('resize', handleResize);
@@ -1636,28 +1663,23 @@ export const DeckGLView = React.memo(function ThreeView({
 
       {isSettingGoal && (
         <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg text-xs font-semibold animate-pulse z-20">
-          Click and Drag on Map to Set Goal Position & Orientation
+          点击拖拽设置目标位置和朝向
         </div>
       )}
-
-      <div className="absolute top-4 right-4 flex flex-col gap-2">
-        {config?.visualize && Object.values(config.visualize).some((v: any) => v?.topic === '/geojson') && (
-          <button
-            onClick={() => setIsSettingGoal(!isSettingGoal)}
-            className={`p-2 rounded-full shadow-lg transition-all ${
-              isSettingGoal ? 'bg-blue-600 text-white animate-pulse' : 'bg-white text-slate-700 hover:bg-slate-50'
-            }`}
-            title="Send Goal Pose"
-          >
-            <Navigation size={24} className={isSettingGoal ? 'rotate-45' : ''} />
-          </button>
-        )}
-      </div>
 
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
         <div ref={fpsDisplayRef} className="bg-white/80 backdrop-blur-sm p-2 rounded text-xs font-mono shadow text-slate-700">
           Pts: {Object.values(pointCloudData).reduce((a, b) => a + b.length, 0).toLocaleString()} | FPS: --
         </div>
+        <button
+          onClick={() => setIsSettingGoal(!isSettingGoal)}
+          className={`bg-white/80 backdrop-blur-sm p-1.5 rounded shadow focus:outline-none transition-colors ${
+            isSettingGoal ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-blue-600'
+          }`}
+          title="Set Goal Pose"
+        >
+          <Navigation size={18} />
+        </button>
         <button
           onClick={() => {
             if (!isFollowing) {
