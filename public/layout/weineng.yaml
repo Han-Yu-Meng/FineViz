@@ -6,18 +6,18 @@ visualize:
     topic: "/cloud_registered"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: true
-    last_time: 1
-    point_size: 0.5
+    last_time: 0.5
+    point_size: 2.5
     color_field: "intensity"
     color_scheme: "turbo"
     alpha: 1.0
     
   global_map:
-    topic: "/global_map"
+    topic: "/global_map_viz"
     type: "sensor_msgs/msg/PointCloud2"
     listen_updates: false
     last_time: 0
-    point_size: 0.5
+    point_size: 1
     color_field: "z"
     color_scheme: "warm"
     alpha: 1.0
@@ -29,34 +29,45 @@ visualize:
     width: 0.8
     color: "#5D99E3"
     alpha: 0.9
+
+  mppi_path:
+    topic: "/mppi_path"
+    type: "nav_msgs/msg/Path"
+    listen_updates: true
+    width: 0.8
+    color: "#5D99E3"
+    alpha: 0.9
   
-  trajectories:
-    topic: "/trajectories"
-    type: "visualization_msgs/msg/MarkerArray"
-    alpha: 0.8
-    
-  map:
+  # trajectories:
+  #   topic: "/trajectories"
+  #   type: "visualization_msgs/msg/MarkerArray"
+  #   alpha: 0.8
+
+  geojson:
+    topic: "/geojson"
+    type: "std_msgs/String"
+
+  map:  #TODO: 消耗资源太多，需要优化
     topic: "/map"
     type: "nav_msgs/msg/OccupancyGrid"
     alpha: 0.5
     color_scheme: "gray"
     draw_behind: true
+
+  passability_map:
+    topic: "/passability_map"
+    type: "sensor_msgs/msg/PointCloud2"
+    listen_updates: true
+    last_time: 0.0
+    point_size: 2.5
+    color_field: "rgb"
+    alpha: 1.0
+
  
 service:
-  Startup:
-    topic: "/wheelchair/startup"
-    type: "std_srvs/srv/Trigger"
-    icon: "Power"
-    
-  Shutdown:
-    topic: "/wheelchair/shutdown"
-    type: "std_srvs/srv/Trigger"
-    icon: "PowerOff" 
-   
-  SetSpeed:
-    topic: "/wheelchair/set_speed"
-    type: "wheelchair_msgs/srv/SetSpeed"
-    icon: "Gauge"
+  Navigation:
+    prefix: "/navigation"
+    icon: "Activity"
     
 chart:
   chart1:
@@ -72,8 +83,12 @@ chart:
       colors: ["#E35D97", "#5DE35D"]
       
 tf: 
-  fixed_frame: "map"
-
   axis_length: 0.2
   axis_width: 0.05
-  axis_label_visualize: true
+  axis_label_visualize: false
+  
+control:
+  max_linear_speed: 0.5
+  max_angular_speed: 1.0
+  max_pose_range: 2.0
+  publish_rate: 50
