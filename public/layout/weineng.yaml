@@ -31,7 +31,7 @@ visualize:
     alpha: 0.9
 
   mppi_path:
-    topic: "/mppi_path"
+    topic: "/astar_path"
     type: "nav_msgs/msg/Path"
     listen_updates: true
     width: 0.8
