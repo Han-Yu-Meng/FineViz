@@ -91,15 +91,16 @@ export function Sidebar({
       
       <div className="flex-1 overflow-y-auto p-2">
         {activeTab === 'info' && (
-          <InfoPanel 
-            config={config} 
-            connected={connected} 
-            layoutPath={layoutPath} 
-            onLayoutPathChange={onLayoutPathChange} 
+          <InfoPanel
+            config={config}
+            connected={connected}
+            layoutPath={layoutPath}
+            onLayoutPathChange={onLayoutPathChange}
             manifest={manifest}
             meshModels={meshModels}
             showRobotModel={showRobotModel}
             onToggleRobotModel={onToggleRobotModel}
+            messages={messages}
           />
         )}
         {activeTab === 'streams' && (

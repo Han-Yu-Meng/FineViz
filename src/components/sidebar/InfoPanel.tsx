@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Power, PowerOff, Gauge, Activity, Box, Eye, EyeOff } from 'lucide-react';
+import { Power, PowerOff, Gauge, Activity, Box, Eye, EyeOff, Circle, Navigation, CircleCheck, AlertTriangle } from 'lucide-react';
 import { AppConfig, ConfigManifest } from '../../hooks/useConfig';
 
 const iconMap: Record<string, React.ElementType> = {
@@ -7,7 +7,11 @@ const iconMap: Record<string, React.ElementType> = {
   PowerOff,
   Gauge,
   Activity,
-  Box
+  Box,
+  Circle,
+  Navigation,
+  CircleCheck,
+  AlertTriangle
 };
 
 interface InfoPanelProps {
@@ -19,6 +23,7 @@ interface InfoPanelProps {
   meshModels?: Record<string, any>;
   showRobotModel: boolean;
   onToggleRobotModel: () => void;
+  messages?: Record<string, any[]>;
 }
 
 // 定义保存每个服务状态的数据结构
@@ -27,20 +32,53 @@ interface ServiceState {
   available: string[];
 }
 
-export function InfoPanel({ 
-  config, 
-  connected, 
-  layoutPath, 
-  onLayoutPathChange, 
+export function InfoPanel({
+  config,
+  connected,
+  layoutPath,
+  onLayoutPathChange,
   manifest,
   meshModels = {},
   showRobotModel,
-  onToggleRobotModel
+  onToggleRobotModel,
+  messages = {}
 }: InfoPanelProps) {
   if (!config) return null;
   
   const services = config.service ? Object.entries(config.service) : [];
+  const statusEntries = config.status ? Object.entries(config.status) : [];
   const globalPort = config.info?.api_port || '4000'; // 读取全局端口
+
+  // 从 ROS messages 中解析各 status 的当前状态
+  const statusMessages = React.useMemo(() => {
+    const result: Record<string, { current: string | null; msg: string | null; icon: React.ElementType | null }> = {};
+    for (const [key, statusConfig] of statusEntries as [string, any][]) {
+      const topicMsgs = messages[statusConfig.topic];
+      if (!topicMsgs || topicMsgs.length === 0) {
+        result[key] = { current: null, msg: null, icon: null };
+        continue;
+      }
+      // 取最新一条消息
+      const latest = topicMsgs[topicMsgs.length - 1];
+      const data = latest?.data;
+      // std_msgs/String 格式：{ data: "STATE_NAME" }
+      const stateName = typeof data === 'string' ? data : data?.data ?? null;
+      if (!stateName) {
+        result[key] = { current: null, msg: null, icon: null };
+        continue;
+      }
+      // 匹配配置中的状态定义
+      const matchedState = (statusConfig.states || []).find(
+        (s: any) => s.state_name === stateName
+      );
+      result[key] = {
+        current: stateName,
+        msg: matchedState?.msg || null,
+        icon: matchedState?.icon ? (iconMap[matchedState.icon] || Circle) : Circle,
+      };
+    }
+    return result;
+  }, [messages, statusEntries]);
 
   // 状态机数据与加载状态
   const [serviceStates, setServiceStates] = useState<Record<string, ServiceState>>({});
@@ -220,7 +258,7 @@ export function InfoPanel({
                       <span className="font-medium text-slate-800">{key}</span>
                     </div>
                   </div>
-                  
+
                   {/* Transition/State Switches */}
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap gap-1.5">
@@ -248,6 +286,66 @@ export function InfoPanel({
                         </span>
                       )}
                     </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Status Section — 导航状态可视化 */}
+      {statusEntries.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-2">Status</h3>
+          <div className="flex flex-col gap-3">
+            {statusEntries.map(([key, statusConfig]: [string, any]) => {
+              const stateInfo = statusMessages[key] || { current: null, msg: null, icon: null };
+              const IconComponent = stateInfo.icon || Circle;
+              const currentStateName = stateInfo.current || '--';
+              const currentMsg = stateInfo.msg || '等待状态更新...';
+
+              return (
+                <div key={key} className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
+                  {/* Header */}
+                  <div className="flex items-center gap-2">
+                    <Activity size={16} className="text-emerald-600" />
+                    <span className="font-medium text-slate-800">{key}</span>
+                  </div>
+
+                  {/* Current State Display */}
+                  <div className="flex items-center gap-3 p-2.5 bg-white rounded border border-slate-200">
+                    <IconComponent size={24} className={stateInfo.current ? 'text-emerald-600' : 'text-slate-300'} />
+                    <div className="flex flex-col">
+                      <span className="text-xs text-slate-500">Current State</span>
+                      <span className={`font-semibold text-sm ${stateInfo.current ? 'text-slate-800' : 'text-slate-400'}`}>
+                        {currentStateName}
+                      </span>
+                      {currentMsg && (
+                        <span className="text-xs text-slate-500 mt-0.5">{currentMsg}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* All States Indicator */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {(statusConfig.states || []).map((state: any) => {
+                      const isCurrent = state.state_name === stateInfo.current;
+                      const StateIcon = iconMap[state.icon] || Circle;
+                      return (
+                        <div
+                          key={state.state_name}
+                          className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-all border ${
+                            isCurrent
+                              ? 'bg-emerald-100 text-emerald-700 border-emerald-300 font-semibold'
+                              : 'bg-white text-slate-500 border-slate-200'
+                          }`}
+                        >
+                          <StateIcon size={12} className={isCurrent ? 'text-emerald-600' : 'text-slate-400'} />
+                          <span>{state.state_name}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );

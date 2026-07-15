@@ -69,6 +69,24 @@ service:
     prefix: "/navigation"
     icon: "Activity"
     
+status:
+  NavigationStatus:
+    topic: "/navigation_state"
+    type: "std_msgs/msg/String"
+    states:
+      - state_name: "IDLE"
+        icon: "Circle"
+        msg: "空闲状态"
+      - state_name: "NAVIGATING"
+        icon: "Navigation"
+        msg: "正在导航中..."
+      - state_name: "GOAL_REACHED"
+        icon: "CircleCheck"
+        msg: "已到达目标点"
+      - state_name: "MPPI_OBSTACLE_BLOCKED"
+        icon: "AlertTriangle"
+        msg: "MPPI 检测到障碍物遮挡"
+    
 chart:
   chart1:
     - topic: "/cmd_vel"
