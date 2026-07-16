@@ -8,6 +8,7 @@ export interface AppConfig {
   visualize: Record<string, any>;
   service: Record<string, any>;
   status: Record<string, any>;
+  log: Record<string, any>;
   chart: Record<string, any>;
   tf: Record<string, any>;
   control?: {

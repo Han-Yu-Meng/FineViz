@@ -86,7 +86,12 @@ status:
       - state_name: "MPPI_OBSTACLE_BLOCKED"
         icon: "AlertTriangle"
         msg: "MPPI 检测到障碍物遮挡"
-    
+
+log:
+  rosout:
+    topic: "/rosout"
+    type: "rcl_interfaces/msg/Log"
+
 chart:
   chart1:
     - topic: "/cmd_vel"

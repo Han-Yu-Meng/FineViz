@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Info, Activity, ListTree, LineChart, Gamepad2 } from 'lucide-react';
+import { Info, Activity, ListTree, LineChart, Gamepad2, ScrollText } from 'lucide-react';
 import { AppConfig, ConfigManifest } from '../hooks/useConfig';
 import { FrameStats, Topic } from '../hooks/useFoxglove';
 import { cn } from '../lib/utils';
@@ -8,6 +8,7 @@ import { StreamsPanel } from './sidebar/StreamsPanel';
 import { TransformsPanel } from './sidebar/TransformsPanel';
 import { ChartsPanel } from './sidebar/ChartsPanel';
 import { GamepadPanel } from './sidebar/GamepadPanel';
+import { LogPanel } from './sidebar/LogPanel';
 
 interface SidebarProps {
   config: AppConfig | null;
@@ -87,55 +88,64 @@ export function Sidebar({
         <TabButton active={activeTab === 'gamepad'} onClick={() => setActiveTab('gamepad')} title="Gamepad">
           <Gamepad2 size={20} />
         </TabButton>
+        <TabButton active={activeTab === 'log'} onClick={() => setActiveTab('log')} title="Logs">
+          <ScrollText size={20} />
+        </TabButton>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-2">
-        {activeTab === 'info' && (
-          <InfoPanel
-            config={config}
-            connected={connected}
-            layoutPath={layoutPath}
-            onLayoutPathChange={onLayoutPathChange}
-            manifest={manifest}
-            meshModels={meshModels}
-            showRobotModel={showRobotModel}
-            onToggleRobotModel={onToggleRobotModel}
-            messages={messages}
-          />
-        )}
-        {activeTab === 'streams' && (
-          <StreamsPanel
-            topics={topics}
-            config={config}
-            messages={messages}
-            messageStats={messageStats}
-            topicVisibility={topicVisibility}
-            onToggleTopicVisibility={onToggleTopicVisibility}
-          />
-        )}
-        {activeTab === 'transforms' && (
-          <TransformsPanel 
-            config={config} 
-            messages={messages} 
-            messageStats={messageStats} 
-            tfVisibility={tfVisibility}
-            onToggleTfVisibility={onToggleTfVisibility}
-          />
-        )}
-        {activeTab === 'charts' && <ChartsPanel config={config} messages={messages} />}
-        {activeTab === 'gamepad' && (
-          <GamepadPanel
-            gamepadConnected={gamepadData.gamepadConnected}
-            gamepadId={gamepadData.gamepadId}
-            v={gamepadData.v}
-            axes={gamepadData.axes}
-            controlMode={gamepadData.controlMode}
-            setControlMode={gamepadData.setControlMode}
-            eStop={gamepadData.eStop}
-            setEStop={gamepadData.setEStop}
-            manualV={gamepadData.manualV}
-            setManualV={gamepadData.setManualV}
-          />
+      <div className="flex-1 min-h-0 flex flex-col">
+        {activeTab === 'log' ? (
+          <LogPanel config={config} messages={messages} />
+        ) : (
+          <div className="flex-1 overflow-y-auto p-2">
+            {activeTab === 'info' && (
+              <InfoPanel
+                config={config}
+                connected={connected}
+                layoutPath={layoutPath}
+                onLayoutPathChange={onLayoutPathChange}
+                manifest={manifest}
+                meshModels={meshModels}
+                showRobotModel={showRobotModel}
+                onToggleRobotModel={onToggleRobotModel}
+                messages={messages}
+              />
+            )}
+            {activeTab === 'streams' && (
+              <StreamsPanel
+                topics={topics}
+                config={config}
+                messages={messages}
+                messageStats={messageStats}
+                topicVisibility={topicVisibility}
+                onToggleTopicVisibility={onToggleTopicVisibility}
+              />
+            )}
+            {activeTab === 'transforms' && (
+              <TransformsPanel
+                config={config}
+                messages={messages}
+                messageStats={messageStats}
+                tfVisibility={tfVisibility}
+                onToggleTfVisibility={onToggleTfVisibility}
+              />
+            )}
+            {activeTab === 'charts' && <ChartsPanel config={config} messages={messages} />}
+            {activeTab === 'gamepad' && (
+              <GamepadPanel
+                gamepadConnected={gamepadData.gamepadConnected}
+                gamepadId={gamepadData.gamepadId}
+                v={gamepadData.v}
+                axes={gamepadData.axes}
+                controlMode={gamepadData.controlMode}
+                setControlMode={gamepadData.setControlMode}
+                eStop={gamepadData.eStop}
+                setEStop={gamepadData.setEStop}
+                manualV={gamepadData.manualV}
+                setManualV={gamepadData.setManualV}
+              />
+            )}
+          </div>
         )}
       </div>
     </div>
