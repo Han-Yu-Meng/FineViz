@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ScrollText, Trash2, ArrowDown, Filter } from 'lucide-react';
 import { AppConfig } from '../../hooks/useConfig';
 
@@ -47,6 +47,18 @@ export function LogPanel({ config, messages }: LogPanelProps) {
   const logConfigs = config?.log ? Object.entries(config.log) : [];
   const topicNames = logConfigs.map(([, cfg]: [string, any]) => cfg.topic);
 
+  // 构建 topic → ignore_nodes 的映射
+  const ignoreNodesMap = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const [, cfg] of logConfigs) {
+      const ignores: string[] = (cfg as any).ignore_nodes || [];
+      if (ignores.length > 0) {
+        map[cfg.topic] = new Set(ignores);
+      }
+    }
+    return map;
+  }, [logConfigs]);
+
   // 从 messages 中提取新日志条目
   useEffect(() => {
     let added = false;
@@ -56,9 +68,14 @@ export function LogPanel({ config, messages }: LogPanelProps) {
       const topicMsgs = messages[topicName];
       if (!topicMsgs || topicMsgs.length === 0) continue;
 
+      const ignoredNodes = ignoreNodesMap[topicName] || null;
+
       for (const msg of topicMsgs) {
         const data = msg?.data;
         if (!data || typeof data.level !== 'number' || !data.msg) continue;
+
+        // 过滤来自忽略节点的日志
+        if (ignoredNodes && ignoredNodes.has(data.name || '')) continue;
 
         // 用 stamp + line + name + msg 前 8 字符作为去重 key
         const key = `${data.stamp?.sec ?? 0}_${data.stamp?.nanosec ?? 0}_${data.line ?? 0}_${data.name ?? ''}_${(data.msg ?? '').slice(0, 8)}`;

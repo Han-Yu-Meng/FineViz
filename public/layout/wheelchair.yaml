@@ -91,6 +91,8 @@ log:
   rosout:
     topic: "/rosout"
     type: "rcl_interfaces/msg/Log"
+    ignore_nodes:
+      - "foxglove_bridge"
 
 chart:
   chart1:
