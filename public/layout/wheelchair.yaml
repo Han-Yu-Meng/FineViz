@@ -47,6 +47,11 @@ visualize:
     topic: "/geojson"
     type: "std_msgs/String"
 
+  speed_limit_markers:
+    topic: "/speed_limit_markers"
+    type: "visualization_msgs/msg/MarkerArray"
+    alpha: 1.0
+
   map:  #TODO: 消耗资源太多，需要优化
     topic: "/map"
     type: "nav_msgs/msg/OccupancyGrid"
