@@ -37,6 +37,16 @@ export function useGamepad(
     eStopRef.current = eStop;
   }, [eStop]);
 
+  // 急停状态变化时发布 /emergency_stop
+  const isFirstEStopRender = useRef(true);
+  useEffect(() => {
+    if (isFirstEStopRender.current) {
+      isFirstEStopRender.current = false;
+      return;
+    }
+    publish('/emergency_stop', 'std_msgs/msg/Bool', { data: eStop });
+  }, [eStop, publish]);
+
   const [gamepadInfo, setGamepadInfo] = useState<{
     connected: boolean, 
     id: string,
