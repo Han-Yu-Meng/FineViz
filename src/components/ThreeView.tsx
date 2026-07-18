@@ -4,13 +4,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
-import { Matrix4, Quaternion } from '@math.gl/core';
-
 import { Maximize, Minimize, Crosshair, MapPin, Navigation } from 'lucide-react';
-import { PointCloudBinary, TFLink, OccupancyGridRaw } from './render/types';
+import { PointCloudBinary, OccupancyGridRaw } from './render/types';
 import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
-import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
 import { parseURDF, URDFRobot } from './render/urdfParser';
 import { loadGLB } from './render/meshLoader';
@@ -172,7 +169,6 @@ interface ThreeViewProps {
   config: AppConfig | null;
   messages: Record<string, any[]>;
   topicVisibility: Record<string, boolean>;
-  tfVisibility: Record<string, boolean>;
   onSendMessage?: (topic: string, type: string, data: any) => void;
   meshModels: Record<string, any>;
   onMeshModelsChange: (models: Record<string, any>) => void;
@@ -183,27 +179,29 @@ export const DeckGLView = React.memo(function ThreeView({
   config,
   messages,
   topicVisibility,
-  tfVisibility,
   onSendMessage,
   meshModels,
   onMeshModelsChange,
   showRobotModel,
 }: ThreeViewProps) {
-  const fixedFrame = config?.tf?.fixed_frame || 'map';
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
   const renderFpsRef = useRef(0);
   const fpsDisplayRef = useRef<HTMLDivElement>(null);
 
-  const [worldMatrices, setWorldMatrices] = useState<Record<string, number[]>>({});
-  const worldMatricesRef = useRef<Record<string, number[]>>({});
+  const [robotPose, setRobotPose] = useState<{
+    position: [number, number, number];
+    orientation: [number, number, number, number];
+  } | null>(null);
+  const robotPoseRef = useRef<typeof robotPose>(null);
+  const robotPoseMatrix = useRef(new THREE.Matrix4());
+  const lastPoseUpdateRef = useRef(0);
 
   const [pointCloudData, setPointCloudData] = useState<Record<string, PointCloudBinary>>({});
   const pointCloudDataRef = useRef<Record<string, PointCloudBinary>>({});
   const [pathData, setPathData] = useState<Record<string, any>>({});
   const [markerData, setMarkerData] = useState<Record<string, Record<string, MarkerPrimitive[]>>>({});
   const [gridData, setGridData] = useState<Record<string, OccupancyGridData>>({});
-  const [tfTree, setTfTree] = useState<Record<string, TFLink>>({});
   const [urdfRobot, setUrdfRobot] = useState<URDFRobot | null>(null);
 
   // 同步 ref 供动画循环读取，避免依赖 state 触发 effect 重启
@@ -236,7 +234,6 @@ export const DeckGLView = React.memo(function ThreeView({
   const pointCloudObjects = useRef<Record<string, THREE.Points>>({});
   const gridObjects = useRef<Record<string, THREE.Mesh>>({});
   const robotModelGroup = useRef<THREE.Group | null>(null);
-  const tfAxisGroup = useRef<THREE.Group | null>(null);
   const markerGroup = useRef<THREE.Group | null>(null);
   const pathGroup = useRef<THREE.Group | null>(null);
   const goalGroup = useRef<THREE.Group | null>(null);
@@ -328,9 +325,6 @@ export const DeckGLView = React.memo(function ThreeView({
     robotModelGroup.current = new THREE.Group();
     scene.add(robotModelGroup.current);
 
-    tfAxisGroup.current = new THREE.Group();
-    scene.add(tfAxisGroup.current);
-
     markerGroup.current = new THREE.Group();
     scene.add(markerGroup.current);
 
@@ -381,17 +375,16 @@ export const DeckGLView = React.memo(function ThreeView({
       controls.update();
 
       // 机器人镜头跟随平滑逻辑
-      const robotFrame = lCfg.current?.robot?.base_frame || 'base_link';
-      const baseMat = worldMatricesRef.current[robotFrame];
-      if (baseMat && cameraRef.current && controlsRef.current) {
+      const pose = robotPoseRef.current;
+      if (pose && cameraRef.current && controlsRef.current) {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         // 平滑机器人物理坐标
         if (smoothedBasePos.current.length() === 0) {
-          smoothedBasePos.current.set(baseMat[12], baseMat[13], baseMat[14]);
+          smoothedBasePos.current.set(pose.position[0], pose.position[1], pose.position[2]);
         } else {
           smoothedBasePos.current.lerp(
-            tempPosition.current.set(baseMat[12], baseMat[13], baseMat[14]),
+            tempPosition.current.set(pose.position[0], pose.position[1], pose.position[2]),
             0.35 // 提升插值率，跟手反馈响应度极高
           );
         }
@@ -498,12 +491,16 @@ export const DeckGLView = React.memo(function ThreeView({
       colAttr.needsUpdate = true;
       geometry.setDrawRange(0, d.length);
 
-      const mat = worldMatrices[d.frameId];
-      if (mat) {
-        tempMatrix.current.fromArray(mat);
-        pointsObj.matrix.copy(tempMatrix.current);
-        pointsObj.matrixAutoUpdate = false;
+      // 根据 YAML 配置的 frame 字段决定矩阵
+      const baseFrame = config?.robot?.base_frame || 'base_link';
+      const vizEntry = Object.values(config?.visualize || {}).find((v: any) => v?.topic === topic) as any;
+      const frame = vizEntry?.frame || 'map';
+      if (frame === baseFrame) {
+        pointsObj.matrix.copy(robotPoseMatrix.current);
+      } else {
+        pointsObj.matrix.identity();
       }
+      pointsObj.matrixAutoUpdate = false;
     });
 
     Object.keys(pointCloudObjects.current).forEach(topic => {
@@ -517,7 +514,7 @@ export const DeckGLView = React.memo(function ThreeView({
         }
       }
     });
-  }, [pointCloudData, worldMatrices, topicVisibility, fixedFrame]);
+  }, [pointCloudData, robotPose, topicVisibility, config?.robot?.base_frame, config?.visualize]);
 
   // ── 3. 栅格地图更新 ──
   useEffect(() => {
@@ -575,7 +572,11 @@ export const DeckGLView = React.memo(function ThreeView({
         mat.needsUpdate = true;
       }
 
-      const matArray = worldMatrices[d.frameId];
+      // 根据 YAML 配置的 frame 字段决定矩阵
+      const baseFrame = config?.robot?.base_frame || 'base_link';
+      const vizEntry = Object.values(config?.visualize || {}).find((v: any) => v?.topic === topic) as any;
+      const frame = vizEntry?.frame || 'map';
+      const matArray = frame === baseFrame && robotPose ? robotPoseMatrix.current.toArray() : null;
       if (matArray) {
         tempMatrix.current.fromArray(matArray);
         const originMat = new THREE.Matrix4().compose(
@@ -589,6 +590,19 @@ export const DeckGLView = React.memo(function ThreeView({
           new THREE.Vector3(gridW, gridH, 1)
         );
         mesh.matrix.copy(tempMatrix.current.clone().multiply(originMat).multiply(scaleMat));
+        mesh.matrixAutoUpdate = false;
+      } else {
+        const originMat = new THREE.Matrix4().compose(
+          new THREE.Vector3(...d.origin.position),
+          new THREE.Quaternion(...d.origin.orientation),
+          new THREE.Vector3(1, 1, 1)
+        );
+        const scaleMat = new THREE.Matrix4().compose(
+          new THREE.Vector3(halfW, halfH, 0),
+          new THREE.Quaternion(),
+          new THREE.Vector3(gridW, gridH, 1)
+        );
+        mesh.matrix.copy(new THREE.Matrix4().identity().multiply(originMat).multiply(scaleMat));
         mesh.matrixAutoUpdate = false;
       }
     });
@@ -604,7 +618,7 @@ export const DeckGLView = React.memo(function ThreeView({
         }
       }
     });
-  }, [gridData, worldMatrices, topicVisibility, fixedFrame, config?.visualize]);
+  }, [gridData, robotPose, topicVisibility, config?.visualize, config?.robot?.base_frame]);
 
   // ── 4. 机器人 URDF 模型 ──
   useEffect(() => {
@@ -619,7 +633,8 @@ export const DeckGLView = React.memo(function ThreeView({
     const defaultWorldMatrices: Record<string, THREE.Matrix4> = {};
     const baseFrame = config?.robot?.base_frame || Object.keys(urdfRobot.links)[0];
     if (baseFrame && urdfRobot.links[baseFrame]) {
-      defaultWorldMatrices[baseFrame] = new THREE.Matrix4().identity();
+      // 根 link 从 robotPose 获取世界矩阵，否则回退到 identity
+      defaultWorldMatrices[baseFrame] = robotPose ? robotPoseMatrix.current.clone() : new THREE.Matrix4().identity();
       const computeDefaultPose = (parentName: string) => {
         Object.values(urdfRobot.joints).forEach(joint => {
           const pName = String(joint.parent);
@@ -647,8 +662,9 @@ export const DeckGLView = React.memo(function ThreeView({
 
     Object.keys(urdfRobot.links).forEach(linkName => {
       const link = urdfRobot.links[linkName];
-      const matArray = worldMatrices[linkName] || defaultWorldMatrices[linkName]?.toArray();
-      const worldMat = matArray ? new THREE.Matrix4().fromArray(matArray) : new THREE.Matrix4().identity();
+      const worldMat = defaultWorldMatrices[linkName]
+        ? defaultWorldMatrices[linkName].clone()
+        : new THREE.Matrix4().identity();
 
       link.visuals.forEach(v => {
         if (!v.geometry.mesh || !meshModels[v.geometry.mesh.filename]) return;
@@ -673,153 +689,24 @@ export const DeckGLView = React.memo(function ThreeView({
         group.add(instance);
       });
     });
-  }, [urdfRobot, meshModels, worldMatrices, showRobotModel, config?.robot?.base_frame]);
+  }, [urdfRobot, meshModels, robotPose, showRobotModel, config?.robot?.base_frame]);
 
-  // ── 5. TF 坐标轴更新 ──
-  useEffect(() => {
-    const group = tfAxisGroup.current;
-    if (!group) return;
-
-    while (group.children.length > 0) group.remove(group.children[0]);
-
-    const links = Object.values(tfTree);
-    const axisLength = config?.tf?.axis_length ?? 0.5;
-    const axisRadius = config?.tf?.axis_width ?? 0.05;
-    const labelVisualize = config?.tf?.axis_label_visualize ?? true;
-
-    // 创建坐标轴圆柱体的辅助函数
-    const makeAxisCylinder = (
-      from: THREE.Vector3, to: THREE.Vector3, color: number, radius: number
-    ) => {
-      const dir = new THREE.Vector3().subVectors(to, from);
-      const len = dir.length();
-      if (len < 1e-6) return null;
-      const geo = new THREE.CylinderGeometry(radius, radius, len, 8);
-      const mat = new THREE.MeshBasicMaterial({ color });
-      const mesh = new THREE.Mesh(geo, mat);
-      // CylinderGeometry 默认沿 Y 轴，需要旋转到方向向量
-      const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
-      mesh.position.copy(mid);
-      const up = new THREE.Vector3(0, 1, 0);
-      const quat = new THREE.Quaternion().setFromUnitVectors(up, dir.normalize());
-      mesh.quaternion.copy(quat);
-      return mesh;
-    };
-
-    // 创建标签 Sprite 的辅助函数（高分辨率 canvas）
-    const makeLabelSprite = (text: string, position: THREE.Vector3) => {
-      const dpr = window.devicePixelRatio || 2;
-      const fontSize = 10;
-      const padX = 24, padY = 12;
-      const radius = 8;
-
-      // 先测量文字宽度
-      const measureCanvas = document.createElement('canvas');
-      const measureCtx = measureCanvas.getContext('2d')!;
-      measureCtx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
-      const textWidth = measureCtx.measureText(text).width;
-
-      const cssW = textWidth + padX * 2;
-      const cssH = fontSize + padY * 2;
-      const canvasW = Math.ceil(cssW * dpr);
-      const canvasH = Math.ceil(cssH * dpr);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = canvasW;
-      canvas.height = canvasH;
-      const ctx = canvas.getContext('2d')!;
-      ctx.scale(dpr, dpr);
-
-      // 背景卡片
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.beginPath();
-      ctx.roundRect?.(0, 0, cssW, cssH, radius);
-      ctx.fill();
-
-      // 文字
-      ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
-      ctx.fillStyle = '#1e293b';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, cssW / 2, cssH / 2);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.minFilter = THREE.LinearMipmapLinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      texture.anisotropy = 4;
-      texture.needsUpdate = true;
-
-      const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
-      const sprite = new THREE.Sprite(spriteMat);
-      const scale = 0.012 / dpr;
-      sprite.scale.set(canvasW * scale, canvasH * scale, 1);
-      sprite.position.copy(position);
-      return sprite;
-    };
-
-    // fixedFrame 原点坐标轴
-    const origin = new THREE.Vector3(0, 0, 0);
-    const xTip = new THREE.Vector3(axisLength, 0, 0);
-    const yTip = new THREE.Vector3(0, axisLength, 0);
-    const zTip = new THREE.Vector3(0, 0, axisLength);
-    [
-      makeAxisCylinder(origin, xTip, 0xef4444, axisRadius),
-      makeAxisCylinder(origin, yTip, 0x22c55e, axisRadius),
-      makeAxisCylinder(origin, zTip, 0x3b82f6, axisRadius),
-    ].forEach(m => m && group.add(m));
-    if (labelVisualize) {
-      group.add(makeLabelSprite(fixedFrame, origin));
-    }
-
-    links.forEach(link => {
-      const isHidden =
-        tfVisibility[link.child] !== undefined
-          ? !tfVisibility[link.child]
-          : (config?.tf?.hidden_frame || []).includes(link.child);
-      if (isHidden) return;
-
-      const worldMat = getFrameMatrix(link.child, tfTree, fixedFrame);
-      const origin = worldMat.transform([0, 0, 0]);
-      const originVec = new THREE.Vector3(origin[0], origin[1], origin[2]);
-
-      // 父子连接线（黄色）
-      const parentMat = getFrameMatrix(link.parent, tfTree, fixedFrame);
-      const parentOrigin = parentMat.transform([0, 0, 0]);
-      const lineGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(parentOrigin[0], parentOrigin[1], parentOrigin[2]),
-        originVec,
-      ]);
-      group.add(new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xeab308 })));
-
-      // 三轴坐标（粗圆柱体）
-      const xTip = new THREE.Vector3(...worldMat.transform([axisLength, 0, 0]));
-      const yTip = new THREE.Vector3(...worldMat.transform([0, axisLength, 0]));
-      const zTip = new THREE.Vector3(...worldMat.transform([0, 0, axisLength]));
-      [
-        makeAxisCylinder(originVec, xTip, 0xef4444, axisRadius),
-        makeAxisCylinder(originVec, yTip, 0x22c55e, axisRadius),
-        makeAxisCylinder(originVec, zTip, 0x3b82f6, axisRadius),
-      ].forEach(m => m && group.add(m));
-
-      // 帧标签
-      if (labelVisualize) {
-        group.add(makeLabelSprite(link.child, originVec));
-      }
-    });
-  }, [tfTree, fixedFrame, config?.tf, tfVisibility]);
-
-  // ── 6. Marker 更新 ──
+  // ── 5. Marker 更新 ──
   useEffect(() => {
     const group = markerGroup.current;
     if (!group) return;
 
     while (group.children.length > 0) group.remove(group.children[0]);
 
-    Object.entries(markerData).forEach(([_topic, frames]) => {
-      Object.entries(frames).forEach(([frameId, markers]) => {
-        const matArray = worldMatrices[frameId];
-        const worldMat = matArray ? new THREE.Matrix4().fromArray(matArray) : new THREE.Matrix4().identity();
+    const baseFrame = config?.robot?.base_frame || 'base_link';
+    Object.entries(markerData).forEach(([topic, frames]) => {
+      const vizEntry = Object.values(config?.visualize || {}).find((v: any) => v?.topic === topic) as any;
+      const frame = vizEntry?.frame || 'map';
+      const worldMat = (frame === baseFrame && robotPose)
+        ? robotPoseMatrix.current.clone()
+        : new THREE.Matrix4().identity();
 
+      Object.entries(frames).forEach(([_frameId, markers]) => {
         markers.forEach(m => {
           if (m.type === 2) {
             const geo = new THREE.SphereGeometry(m.scale[0] / 2, 8, 8);
@@ -850,9 +737,7 @@ export const DeckGLView = React.memo(function ThreeView({
         });
       });
     });
-  }, [markerData, worldMatrices, fixedFrame]);
-
-  // ── 7. Path 路径更新 ──
+  }, [markerData, robotPose, config?.visualize, config?.robot?.base_frame]);
   useEffect(() => {
     const group = pathGroup.current;
     if (!group) return;
@@ -872,10 +757,14 @@ export const DeckGLView = React.memo(function ThreeView({
 
     const rendererSize = rendererRef.current?.getSize(new THREE.Vector2()) || new THREE.Vector2(800, 600);
 
-    Object.entries(pathData).forEach(([_topic, d]) => {
+    const baseFrame = config?.robot?.base_frame || 'base_link';
+    Object.entries(pathData).forEach(([topic, d]) => {
       if (!d.path || d.path.length < 2) return;
-      const matArray = worldMatrices[d.frameId];
-      const worldMat = matArray ? new THREE.Matrix4().fromArray(matArray) : new THREE.Matrix4().identity();
+      const vizEntry = Object.values(config?.visualize || {}).find((v: any) => v?.topic === topic) as any;
+      const frame = vizEntry?.frame || 'map';
+      const worldMat = (frame === baseFrame && robotPose)
+        ? robotPoseMatrix.current.clone()
+        : new THREE.Matrix4().identity();
 
       const positions: number[] = [];
       d.path.forEach((p: number[]) => {
@@ -906,7 +795,7 @@ export const DeckGLView = React.memo(function ThreeView({
       line.matrixAutoUpdate = false;
       group.add(line);
     });
-  }, [pathData, worldMatrices, fixedFrame]);
+  }, [pathData, robotPose, config?.visualize, config?.robot?.base_frame]);
 
   // ── 8. Goal pose 箭头 ──
   useEffect(() => {
@@ -1182,81 +1071,35 @@ export const DeckGLView = React.memo(function ThreeView({
       }
     }
 
-    // --- TF ---
-    const rawTf = [...(msgs['/tf'] || []), ...(msgs['/tf_static'] || [])];
-    if (rawTf.length > 0) {
-      setTfTree(prev => {
-        const next = { ...prev };
-        let changed = false;
-        const seenFrames = new Set<string>();
-        for (let i = rawTf.length - 1; i >= 0; i--) {
-          const transforms = rawTf[i].data?.transforms || rawTf[i].transforms || [];
-          for (let j = transforms.length - 1; j >= 0; j--) {
-            const t = transforms[j];
-            const childFrameId = (t.child_frame_id || '').startsWith('/')
-              ? t.child_frame_id.substring(1)
-              : t.child_frame_id;
-            const parentFrameId = (t.header.frame_id || '').startsWith('/')
-              ? t.header.frame_id.substring(1)
-              : t.header.frame_id;
-            if (seenFrames.has(childFrameId)) continue;
-            seenFrames.add(childFrameId);
-            const existing = next[childFrameId];
-            const isDifferent =
-              !existing ||
-              existing.parent !== parentFrameId ||
-              existing.position[0] !== t.transform.translation.x ||
-              existing.position[1] !== t.transform.translation.y ||
-              existing.position[2] !== t.transform.translation.z ||
-              existing.rotation[0] !== t.transform.rotation.x ||
-              existing.rotation[1] !== t.transform.rotation.y ||
-              existing.rotation[2] !== t.transform.rotation.z ||
-              existing.rotation[3] !== t.transform.rotation.w;
-            if (isDifferent) {
-              next[childFrameId] = {
-                parent: parentFrameId,
-                child: childFrameId,
-                position: [
-                  t.transform.translation.x,
-                  t.transform.translation.y,
-                  t.transform.translation.z,
-                ],
-                rotation: [
-                  t.transform.rotation.x,
-                  t.transform.rotation.y,
-                  t.transform.rotation.z,
-                  t.transform.rotation.w,
-                ],
-              };
-              changed = true;
-            }
+    // --- Pose (20Hz throttle) ---
+    const poseTopic = cfg.pose?.topic;
+    if (poseTopic) {
+      const poseMsgs = msgs[poseTopic] || [];
+      if (poseMsgs.length > 0) {
+        const now = Date.now();
+        if (now - lastPoseUpdateRef.current >= 50) {  // 20Hz
+          lastPoseUpdateRef.current = now;
+          const latest = poseMsgs[poseMsgs.length - 1];
+          const p = latest.data?.pose;
+          if (p?.position && p?.orientation) {
+            const newPose = {
+              position: [p.position.x, p.position.y, p.position.z] as [number, number, number],
+              orientation: [p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w] as [number, number, number, number],
+            };
+            setRobotPose(newPose);
+            robotPoseRef.current = newPose;
+            const m = new THREE.Matrix4();
+            m.compose(
+              new THREE.Vector3(p.position.x, p.position.y, p.position.z),
+              new THREE.Quaternion(p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w),
+              new THREE.Vector3(1, 1, 1)
+            );
+            robotPoseMatrix.current = m;
           }
         }
-        if (cfg.tf?.fixed_transform) {
-          Object.entries(cfg.tf.fixed_transform).forEach(([childFrameId, transform]: [string, any]) => {
-            if (!next[childFrameId]) {
-              next[childFrameId] = {
-                parent: transform.parent,
-                child: childFrameId,
-                position: transform.position,
-                rotation: transform.rotation,
-              };
-              changed = true;
-            }
-          });
-        }
-        if (changed) {
-          const matrices: Record<string, number[]> = { [fixedFrame]: new Matrix4().toArray() };
-          Object.keys(next).forEach(frameId => {
-            matrices[frameId] = getFrameMatrix(frameId, next, fixedFrame).toArray();
-          });
-          setWorldMatrices(matrices);
-          worldMatricesRef.current = matrices;
-        }
-        return changed ? next : prev;
-      });
+      }
     }
-  }, [fixedFrame]);
+  }, [config?.pose?.topic]);
 
   useEffect(() => {
     const timer = setInterval(runDecode, 100);
@@ -1333,7 +1176,7 @@ export const DeckGLView = React.memo(function ThreeView({
     const qw = Math.cos(yaw / 2);
     const poseData = {
       header: {
-        frame_id: fixedFrame,
+        frame_id: 'map',
         stamp: { sec: Math.floor(Date.now() / 1000), nanosec: (Date.now() % 1000) * 1000000 },
       },
       pose: {
@@ -1343,7 +1186,7 @@ export const DeckGLView = React.memo(function ThreeView({
     };
     onSendMessage?.('/goal_pose', 'geometry_msgs/msg/PoseStamped', poseData);
     setConfirmStation(null);
-  }, [confirmStation, computeStationYaw, fixedFrame, onSendMessage]);
+  }, [confirmStation, computeStationYaw, onSendMessage]);
 
   const line2Refs = useRef<Line2[]>([]);
   const stationMeshMapRef = useRef<
@@ -1618,7 +1461,7 @@ export const DeckGLView = React.memo(function ThreeView({
         const qw = Math.cos(goalYaw / 2);
         const poseData = {
           header: {
-            frame_id: fixedFrame,
+            frame_id: 'map',
             stamp: { sec: Math.floor(Date.now() / 1000), nanosec: (Date.now() % 1000) * 1000000 },
           },
           pose: {
@@ -1643,7 +1486,7 @@ export const DeckGLView = React.memo(function ThreeView({
         handleStationClick(clickedFeature);
       }
     },
-    [isSettingGoal, goalPosition, goalYaw, fixedFrame, onSendMessage, handleStationClick, getStationFromClick]
+    [isSettingGoal, goalPosition, goalYaw, onSendMessage, handleStationClick, getStationFromClick]
   );
 
   return (

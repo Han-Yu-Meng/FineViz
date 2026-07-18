@@ -7,13 +7,6 @@ export type PointCloudBinary = {
   alpha?: number;
 };
 
-export interface TFLink {
-  parent: string;
-  child: string;
-  position: [number, number, number];
-  rotation: [number, number, number, number]; // quaternion [x, y, z, w]
-}
-
 // ── Web Worker 消息协议 ──
 
 export interface OccupancyGridRaw {

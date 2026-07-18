@@ -7,10 +7,9 @@ import { AppConfig } from '../hooks/useConfig';
 import { Matrix4, Quaternion } from '@math.gl/core';
 
 import { Maximize, Minimize, Crosshair, Navigation, MapPin } from 'lucide-react';
-import { PointCloudBinary, TFLink } from './render/types';
+import { PointCloudBinary } from './render/types';
 import { decodePointCloud } from './render/pointCloudDecoder';
 import { decodeMarkerArray, MarkerPrimitive } from './render/markerDecoder';
-import { getFrameMatrix } from './render/tfTreeResolver';
 import { decodeOccupancyGrid, OccupancyGridData } from './render/occupancyGridDecoder';
 import type { OccupancyGridRaw } from './render/types';
 import { parseURDF, URDFRobot } from './render/urdfParser';

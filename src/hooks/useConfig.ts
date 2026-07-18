@@ -10,7 +10,10 @@ export interface AppConfig {
   status: Record<string, any>;
   log: Record<string, any>;
   chart: Record<string, any>;
-  tf: Record<string, any>;
+  pose?: {
+    topic?: string;
+    type?: string;
+  };
   control?: {
     max_linear_speed?: number;
     max_angular_speed?: number;
@@ -19,6 +22,7 @@ export interface AppConfig {
   };
   robot?: {
     urdf?: string;
+    base_frame?: string;
   };
 }
 

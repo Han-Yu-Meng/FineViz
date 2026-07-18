@@ -52,9 +52,13 @@ export function collectLayoutTopics(config: AppConfig | null): LayoutTopicItem[]
     });
   });
 
-  // 🌟 Ensure /tf and /tf_static are always subscribed if they exist in topics
-  if (!topicMap.has('/tf')) topicMap.set('/tf', { name: '/tf', type: 'tf' });
-  if (!topicMap.has('/tf_static')) topicMap.set('/tf_static', { name: '/tf_static', type: 'tf_static' });
+  // Add pose topic if configured
+  if (config.pose?.topic && !topicMap.has(config.pose.topic)) {
+    topicMap.set(config.pose.topic, {
+      name: config.pose.topic,
+      type: config.pose.type || 'geometry_msgs/msg/PoseStamped',
+    });
+  }
 
   return Array.from(topicMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

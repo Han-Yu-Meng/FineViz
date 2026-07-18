@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { Info, Activity, ListTree, LineChart, Gamepad2, ScrollText } from 'lucide-react';
+import { Info, Activity, LineChart, Gamepad2, ScrollText } from 'lucide-react';
 import { AppConfig, ConfigManifest } from '../hooks/useConfig';
 import { FrameStats, Topic } from '../hooks/useFoxglove';
 import { cn } from '../lib/utils';
 import { InfoPanel } from './sidebar/InfoPanel';
 import { StreamsPanel } from './sidebar/StreamsPanel';
-import { TransformsPanel } from './sidebar/TransformsPanel';
 import { ChartsPanel } from './sidebar/ChartsPanel';
 import { GamepadPanel } from './sidebar/GamepadPanel';
 import { LogPanel } from './sidebar/LogPanel';
@@ -16,8 +15,6 @@ interface SidebarProps {
   connected: boolean;
   topicVisibility: Record<string, boolean>;
   onToggleTopicVisibility: (topicName: string) => void;
-  tfVisibility: Record<string, boolean>;
-  onToggleTfVisibility: (frameId: string) => void;
   messages: Record<string, any[]>;
   messageStats: Record<string, FrameStats>;
   activeTab?: string;
@@ -42,15 +39,13 @@ interface SidebarProps {
   };
 }
 
-export function Sidebar({ 
-  config, 
+export function Sidebar({
+  config,
   topics,
   connected,
-  topicVisibility, 
-  onToggleTopicVisibility, 
-  tfVisibility,
-  onToggleTfVisibility,
-  messages, 
+  topicVisibility,
+  onToggleTopicVisibility,
+  messages,
   messageStats,
   activeTab: externalTab,
   onTabChange,
@@ -78,9 +73,6 @@ export function Sidebar({
         </TabButton>
         <TabButton active={activeTab === 'streams'} onClick={() => setActiveTab('streams')} title="Streams">
           <Activity size={20} />
-        </TabButton>
-        <TabButton active={activeTab === 'transforms'} onClick={() => setActiveTab('transforms')} title="TF">
-          <ListTree size={20} />
         </TabButton>
         <TabButton active={activeTab === 'charts'} onClick={() => setActiveTab('charts')} title="Charts">
           <LineChart size={20} />
@@ -119,15 +111,6 @@ export function Sidebar({
                 messageStats={messageStats}
                 topicVisibility={topicVisibility}
                 onToggleTopicVisibility={onToggleTopicVisibility}
-              />
-            )}
-            {activeTab === 'transforms' && (
-              <TransformsPanel
-                config={config}
-                messages={messages}
-                messageStats={messageStats}
-                tfVisibility={tfVisibility}
-                onToggleTfVisibility={onToggleTfVisibility}
               />
             )}
             {activeTab === 'charts' && <ChartsPanel config={config} messages={messages} />}
