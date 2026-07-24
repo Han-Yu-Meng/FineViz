@@ -1080,7 +1080,11 @@ export const DeckGLView = React.memo(function ThreeView({
         if (now - lastPoseUpdateRef.current >= 50) {  // 20Hz
           lastPoseUpdateRef.current = now;
           const latest = poseMsgs[poseMsgs.length - 1];
-          const p = latest.data?.pose;
+          // 兼容 PoseStamped (data.pose) 和 Odometry (data.pose.pose)
+          const poseType = cfg.pose?.type;
+          const p = poseType === 'nav_msgs/msg/Odometry'
+            ? latest.data?.pose?.pose
+            : latest.data?.pose;
           if (p?.position && p?.orientation) {
             const newPose = {
               position: [p.position.x, p.position.y, p.position.z] as [number, number, number],

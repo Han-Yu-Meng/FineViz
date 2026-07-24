@@ -3,9 +3,9 @@ info:
 
 visualize:
   cloud_registered:
-    topic: "/cloud_registered_body"
+    topic: "/cloud_registered"
     type: "sensor_msgs/msg/PointCloud2"
-    frame: "base_link"
+    frame: "map"
     listen_updates: true
     last_time: 0.5
     point_size: 2.5
@@ -72,8 +72,8 @@ chart:
       colors: ["#E35D97", "#5DE35D"]
 
 pose:
-  topic: "/localization_pose"
-  type: "geometry_msgs/msg/PoseStamped"
+  topic: "/Odometry"
+  type: "nav_msgs/msg/Odometry"
 
 robot:
   urdf: "fins/fins.urdf"

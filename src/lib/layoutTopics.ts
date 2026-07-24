@@ -56,7 +56,7 @@ export function collectLayoutTopics(config: AppConfig | null): LayoutTopicItem[]
   if (config.pose?.topic && !topicMap.has(config.pose.topic)) {
     topicMap.set(config.pose.topic, {
       name: config.pose.topic,
-      type: config.pose.type || 'geometry_msgs/msg/PoseStamped',
+      type: config.pose.type || 'nav_msgs/msg/Odometry',
     });
   }
 
