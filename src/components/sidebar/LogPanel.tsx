@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ScrollText, Trash2, ArrowDown, Filter } from 'lucide-react';
+import { ScrollText, Trash2, ArrowDown, Filter, Download } from 'lucide-react';
 import { AppConfig } from '../../hooks/useConfig';
 
 interface LogEntry {
@@ -128,12 +128,36 @@ export function LogPanel({ config, messages }: LogPanelProps) {
     seenRef.current.clear();
   }, []);
 
-  // 过滤
+  // 过滤: 同时搜索 logger 名称和日志消息内容
   const filteredEntries = logEntries.filter(e => {
     if (e.level < minLevel) return false;
-    if (nameFilter && !e.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
+    if (nameFilter) {
+      const lower = nameFilter.toLowerCase();
+      if (!e.name.toLowerCase().includes(lower) && !e.msg.toLowerCase().includes(lower)) return false;
+    }
     return true;
   });
+
+  // 导出当前筛选显示的日志为文件下载
+  const exportLogs = useCallback(() => {
+    const lines: string[] = [];
+    for (const entry of filteredEntries) {
+      const info = LOG_LEVELS[entry.level] || LOG_LEVELS[10];
+      const time = formatTime(entry.stamp.sec, entry.stamp.nanosec);
+      lines.push(`[${info.label}] [${time}] [${entry.name}] ${entry.msg}`);
+    }
+    const content = lines.join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    a.download = `fineviz-logs-${now.toISOString().slice(0, 19).replace(/:/g, '-')}.log`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [filteredEntries]);
 
   // 按日志级别统计
   const levelCounts: Record<number, number> = {};
@@ -176,7 +200,7 @@ export function LogPanel({ config, messages }: LogPanelProps) {
             <Filter size={12} className="text-slate-400 shrink-0" />
             <input
               type="text"
-              placeholder="Filter logger..."
+              placeholder="Filter node / text..."
               value={nameFilter}
               onChange={e => setNameFilter(e.target.value)}
               className="flex-1 bg-transparent text-xs outline-none text-slate-700 placeholder:text-slate-400"
@@ -193,6 +217,13 @@ export function LogPanel({ config, messages }: LogPanelProps) {
             title={autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
           >
             <ArrowDown size={14} />
+          </button>
+          <button
+            onClick={exportLogs}
+            className="p-1 rounded text-xs text-slate-400 hover:text-green-600 transition-colors"
+            title="Export filtered logs"
+          >
+            <Download size={14} />
           </button>
           <button
             onClick={clearLogs}
