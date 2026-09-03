@@ -1,6 +1,6 @@
 # FineViz
 ```bash
-npm install --legacy-peer-deps
+npm install
 npm run build
 npm run preview
 ```
